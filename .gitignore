@@ -1,0 +1,4 @@
+node_modules
+dist
+.prompts/
+.lane-out/
