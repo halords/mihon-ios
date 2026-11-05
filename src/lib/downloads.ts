@@ -58,7 +58,7 @@ export async function downloadChapter(
         blob = new Blob([bytes], { type: mime });
       }
     } else {
-      const res = await fetch(url);
+      const res = await fetch(url, { referrerPolicy: 'no-referrer' });
       if (!res.ok) {
         throw new Error(`Failed to fetch page ${i + 1}: HTTP ${res.status}`);
       }

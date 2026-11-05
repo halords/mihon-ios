@@ -202,7 +202,7 @@ export default function UpdatesPage() {
                 onClick={() => nav.openManga(row.mangaKey)}
               >
                 {row.manga.coverUrl ? (
-                  <img
+                  <img referrerPolicy="no-referrer"
                     src={row.manga.coverUrl}
                     alt=""
                     width={40}

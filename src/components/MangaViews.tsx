@@ -95,7 +95,7 @@ export function MangaGrid({ items, onOpen, onMenu }: MangaViewProps) {
             aria-label={`Open ${item.manga.title}`}
           >
             <span style={{ display: "block", position: "relative" }}>
-              <img
+              <img referrerPolicy="no-referrer"
                 className="cover"
                 src={coverUrl(item.manga)}
                 alt=""
@@ -186,7 +186,7 @@ export function MangaList({ items, onOpen, onMenu }: MangaViewProps) {
             onClick={() => onOpen(item.key)}
             aria-label={`Open ${item.manga.title}`}
           >
-            <img
+            <img referrerPolicy="no-referrer"
               className="cover"
               src={coverUrl(item.manga)}
               alt=""

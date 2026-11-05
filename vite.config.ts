@@ -35,23 +35,10 @@ export default defineConfig({
       },
       workbox: {
         globPatterns: ['**/*.{js,css,html,png,svg,ico,webmanifest}'],
-        runtimeCaching: [
-          {
-            // MangaDex covers: cache-first so the library and history look
-            // right offline. Chapter pages are NOT runtime-cached; offline
-            // chapters come from explicit downloads (Cache Storage).
-            urlPattern: /^https:\/\/uploads\.mangadex\.org\/covers\//,
-            handler: 'CacheFirst',
-            options: {
-              cacheName: 'mangadex-covers-v1',
-              expiration: {
-                maxEntries: 500,
-                maxAgeSeconds: 60 * 60 * 24 * 30,
-              },
-              cacheableResponse: { statuses: [0, 200] },
-            },
-          },
-        ],
+        // No runtime caching: iOS Safari mishandles service-worker caching
+        // of cross-origin cover responses (broken images). Covers load from
+        // the network; offline chapters come from explicit downloads, which
+        // use the app's own Cache Storage code.
       },
     }),
   ],

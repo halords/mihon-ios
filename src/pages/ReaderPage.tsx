@@ -661,7 +661,7 @@ export default function ReaderPage({
         <>
           <div className="reader-pages" ref={pagesRef}>
             {reader.pages.map((url, index) => (
-              <img
+              <img referrerPolicy="no-referrer"
                 key={`${reader.cKey}:${index}`}
                 src={url}
                 loading={index < 2 ? 'eager' : 'lazy'}
@@ -703,7 +703,7 @@ export default function ReaderPage({
             background: '#000',
           }}
         >
-          <img
+          <img referrerPolicy="no-referrer"
             key={`${reader.cKey}:${page}`}
             src={reader.pages[page]}
             alt={`Page ${page + 1}`}

@@ -191,7 +191,7 @@ export function MangaDetailsPage({ mangaKey }: { mangaKey: string }) {
       {topbar}
 
       <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
-        <img
+        <img referrerPolicy="no-referrer"
           src={manga.coverUrl}
           alt={manga.title}
           style={{

@@ -52,7 +52,7 @@ export default function HistoryPage() {
             return (
               <div className="list-row" key={record.key}>
                 {record.coverUrl ? (
-                  <img
+                  <img referrerPolicy="no-referrer"
                     src={record.coverUrl}
                     alt=""
                     width={40}
