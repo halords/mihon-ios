@@ -161,15 +161,20 @@ export default function ReaderPage({
           (entry) => entry.imageUrl,
         );
       }
-      const index = chapters.findIndex((chapter) => chapter.id === chapterId);
+      // Prev/next navigation only walks chapters that are readable in-app;
+      // external chapters have no pages here.
+      const readable = chapters.filter((chapter) => !chapter.external);
+      const readableIndex = readable.findIndex(
+        (chapter) => chapter.id === chapterId,
+      );
 
       return {
         manga,
         chapters,
         current,
         pages,
-        prev: index > 0 ? chapters[index - 1] : undefined,
-        next: chapters[index + 1],
+        prev: readableIndex > 0 ? readable[readableIndex - 1] : undefined,
+        next: readable[readableIndex + 1],
         initialPage: clampPage(state?.lastPage ?? 0, pages.length),
         cKey,
       };

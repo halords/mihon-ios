@@ -7,6 +7,7 @@ export interface MangaListItem {
   manga: SManga;
   unread?: number;
   sourceMissing?: boolean;
+  inLibrary?: boolean;
 }
 
 type MangaViewProps = {
@@ -60,6 +61,51 @@ function coverUrl(manga: SManga): string | undefined {
     return manga.cover || undefined;
   }
   return undefined;
+}
+
+export function HeartIconSvg({
+  filled,
+  size = 11,
+}: {
+  filled: boolean;
+  size?: number;
+}) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill={filled ? "currentColor" : "none"}
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      style={{ flexShrink: 0 }}
+    >
+      <path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z" />
+    </svg>
+  );
+}
+
+function InLibraryChip() {
+  return (
+    <span
+      className="chip"
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 4,
+        padding: "2px 6px",
+        fontSize: "0.7rem",
+        background: "rgba(0, 0, 0, 0.55)",
+        color: "#fff",
+      }}
+    >
+      <HeartIconSvg filled />
+      In Library
+    </span>
+  );
 }
 
 function NoSourceChip() {
@@ -116,6 +162,11 @@ export function MangaGrid({ items, onOpen, onMenu }: MangaViewProps) {
                   aria-label={`${item.unread} unread chapters`}
                 >
                   {item.unread}
+                </span>
+              )}
+              {item.inLibrary && (
+                <span style={{ position: "absolute", bottom: 6, left: 6 }}>
+                  <InLibraryChip />
                 </span>
               )}
             </span>
@@ -216,6 +267,11 @@ export function MangaList({ items, onOpen, onMenu }: MangaViewProps) {
                   .join(" · ")}
               </span>
               {item.sourceMissing && <NoSourceChip />}
+              {item.inLibrary && (
+                <span style={{ display: "block", marginTop: 4 }}>
+                  <InLibraryChip />
+                </span>
+              )}
             </span>
             {item.unread !== undefined && item.unread > 0 && (
               <span

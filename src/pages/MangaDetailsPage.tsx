@@ -24,6 +24,25 @@ import {
 } from '../sources/Source';
 import { cdnUrl } from '../lib/fetchJson';
 
+function HeartIcon({ filled }: { filled: boolean }) {
+  return (
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill={filled ? 'currentColor' : 'none'}
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      style={{ flexShrink: 0 }}
+    >
+      <path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z" />
+    </svg>
+  );
+}
+
 export function MangaDetailsPage({ mangaKey }: { mangaKey: string }) {
   const { back, openReader } = useNav();
   const separator = mangaKey.indexOf('::');
@@ -150,7 +169,11 @@ export function MangaDetailsPage({ mangaKey }: { mangaKey: string }) {
   const { manga, chapters, stateByKey, inLibrary, category, sourceOk } = data;
   const sourceName = getSource(sourceId)?.name ?? sourceId;
   const creators = [manga.author, manga.artist].filter(Boolean).join(' / ');
-  const firstUnread = chapters.find(
+  // External chapters are listed for honesty but are not readable in-app:
+  // they never count for Start/Continue or unread logic.
+  const readableChapters = chapters.filter((chapter) => !chapter.external);
+  const allExternal = chapters.length > 0 && readableChapters.length === 0;
+  const firstUnread = readableChapters.find(
     (chapter) => !stateByKey[chapterKey(sourceId, mangaId, chapter.id)]?.read,
   );
   const anyRead = chapters.some(
@@ -265,7 +288,7 @@ export function MangaDetailsPage({ mangaKey }: { mangaKey: string }) {
       <div
         style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 16 }}
       >
-        {chapters.length > 0 && (
+        {readableChapters.length > 0 && (
           <button
             type="button"
             className="btn"
@@ -285,26 +308,30 @@ export function MangaDetailsPage({ mangaKey }: { mangaKey: string }) {
         {inLibrary ? (
           <button
             type="button"
-            className="btn-ghost"
+            className="btn"
             disabled={mutating}
             aria-haspopup="dialog"
             aria-expanded={showSheet}
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
             onClick={() => {
               setActionError(null);
               setShowSheet(true);
             }}
           >
+            <HeartIcon filled />
             In Library · {category ?? 'Default'}
           </button>
         ) : (
           <button
             type="button"
-            className="btn-ghost"
+            className="btn"
             disabled={mutating}
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
             onClick={() => {
               void updateLibrary(() => addToLibrary(mangaKey, 'Default'));
             }}
           >
+            <HeartIcon filled={false} />
             Add to Library
           </button>
         )}
@@ -329,61 +356,84 @@ export function MangaDetailsPage({ mangaKey }: { mangaKey: string }) {
           </button>
         )}
         {chapters.length === 0 ? (
-          <div className="empty">No chapters yet.</div>
+          <div className="empty">
+            {sourceOk
+              ? `No chapters listed for this title on ${sourceName} yet.`
+              : 'No chapters yet.'}
+          </div>
         ) : (
-          [...chapters].reverse().map((chapter) => {
-            const key = chapterKey(sourceId, mangaId, chapter.id);
-            const state = stateByKey[key];
+          <>
+            {allExternal && (
+              <p style={{ color: 'var(--dim)' }}>
+                These chapters are hosted on external sites and can't be read
+                in the app — tap one to open it on MangaDex.
+              </p>
+            )}
+            {[...chapters].reverse().map((chapter) => {
+              const key = chapterKey(sourceId, mangaId, chapter.id);
+              const state = stateByKey[key];
+              const isExternal = !!chapter.external;
 
-            return (
-              <div key={key} className="list-row" style={{ width: '100%' }}>
-                <button
-                  type="button"
-                  disabled={!sourceOk}
-                  onClick={() => {
-                    if (sourceOk) {
-                      openReader(mangaKey, chapter.id);
-                    }
-                  }}
-                  style={{
-                    flex: 1,
-                    minWidth: 0,
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 8,
-                    textAlign: 'left',
-                    background: 'none',
-                    border: 'none',
-                    padding: 0,
-                    font: 'inherit',
-                    cursor: sourceOk ? 'pointer' : 'default',
-                    color: state?.read ? 'var(--dim)' : 'var(--text)',
-                  }}
-                >
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div>{chapter.name}</div>
-                    <small style={{ color: 'var(--dim)' }}>
-                      {new Date(chapter.dateUpload).toLocaleDateString()}
-                    </small>
-                  </div>
-                  {state?.read && (
-                    <span style={{ fontSize: '0.75rem', color: 'var(--dim)' }}>
-                      READ
-                    </span>
+              return (
+                <div key={key} className="list-row" style={{ width: '100%' }}>
+                  <button
+                    type="button"
+                    disabled={!sourceOk && !isExternal}
+                    onClick={() => {
+                      if (isExternal) {
+                        window.open(
+                          `https://mangadex.org/chapter/${chapter.id}`,
+                          '_blank',
+                          'noopener',
+                        );
+                      } else if (sourceOk) {
+                        openReader(mangaKey, chapter.id);
+                      }
+                    }}
+                    style={{
+                      flex: 1,
+                      minWidth: 0,
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 8,
+                      textAlign: 'left',
+                      background: 'none',
+                      border: 'none',
+                      padding: 0,
+                      font: 'inherit',
+                      cursor: sourceOk || isExternal ? 'pointer' : 'default',
+                      color:
+                        isExternal || state?.read
+                          ? 'var(--dim)'
+                          : 'var(--text)',
+                    }}
+                  >
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div>{chapter.name}</div>
+                      <small style={{ color: 'var(--dim)' }}>
+                        {new Date(chapter.dateUpload).toLocaleDateString()}
+                      </small>
+                    </div>
+                    {isExternal && <span className="chip">External</span>}
+                    {state?.read && (
+                      <span style={{ fontSize: '0.75rem', color: 'var(--dim)' }}>
+                        READ
+                      </span>
+                    )}
+                  </button>
+                  {sourceOk && !isExternal && (
+                    <DownloadButton
+                      mangaKey={mangaKey}
+                      sourceId={sourceId}
+                      mangaId={mangaId}
+                      chapterId={chapter.id}
+                      downloaded={!!state?.downloaded}
+                    />
                   )}
-                </button>
-                {sourceOk && (
-                  <DownloadButton
-                    mangaKey={mangaKey}
-                    sourceId={sourceId}
-                    mangaId={mangaId}
-                    chapterId={chapter.id}
-                    downloaded={!!state?.downloaded}
-                  />
-                )}
-              </div>
-            );
-          })
+                </div>
+              );
+            })}
+          </>
         )}
       </section>
 

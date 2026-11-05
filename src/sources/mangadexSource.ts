@@ -257,6 +257,8 @@ export const mangadexSource: Source = {
             : `Chapter ${numStr}`
           : (t ?? 'Oneshot');
       const dateUpload = Date.parse(c.attributes?.publishAt ?? '') || 0;
+      const external =
+        !!(c.attributes?.externalUrl ?? null) || c.attributes?.pages === 0;
 
       return {
         id: c.id,
@@ -264,6 +266,7 @@ export const mangadexSource: Source = {
         name,
         number: safeNumber,
         dateUpload,
+        ...(external ? { external: true } : {}),
       };
     }
 
@@ -285,10 +288,11 @@ export const mangadexSource: Source = {
       const batch = res.data ?? [];
 
       for (const chapter of batch) {
-        const attrs = chapter.attributes ?? {};
-        if (attrs.externalUrl || attrs.pages === 0) {
-          continue;
-        }
+        // Keep external (externally hosted / 0-page) chapters in the list,
+        // flagged external: true — the details page shows them greyed with
+        // an "External" chip instead of pretending the title has no
+        // chapters. They are excluded from unread counts, Continue/Start
+        // and downloads.
         all.push(mapChapter(chapter));
       }
 

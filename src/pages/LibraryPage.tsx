@@ -44,7 +44,9 @@ async function loadLibrary() {
       const readKeys = new Set(
         states.filter((state) => state.read).map((state) => state.key),
       );
-      const unread = metas.filter((meta) => !readKeys.has(meta.key)).length;
+      const unread = metas.filter(
+        (meta) => !meta.chapter.external && !readKeys.has(meta.key),
+      ).length;
 
       return { entry, stored, unread };
     }),

@@ -1,6 +1,7 @@
 import { getSource } from '../sources';
 import {
   deleteDownload,
+  getChapterMetas,
   getDownloadsForManga,
   patchChapterState,
   putDownload,
@@ -22,6 +23,14 @@ export async function downloadChapter(
 ): Promise<number> {
   const source = getSource(sourceId);
   if (!source) throw new Error('Source not available in PWA yet');
+
+  // External chapters are hosted outside the source API and have no pages
+  // to download — never attempt them.
+  const metas = await getChapterMetas(mangaKey);
+  const meta = metas.find((record) => record.key === chapterKeyValue);
+  if (meta?.chapter.external) {
+    throw new Error("External chapters can't be downloaded");
+  }
 
   // The source API resolves pages using only the chapter ID.
   void mangaId;

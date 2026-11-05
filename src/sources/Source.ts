@@ -18,6 +18,7 @@ export interface SChapter {
   name: string;
   number: number;
   dateUpload: number; // epoch ms
+  external?: boolean; // hosted outside the source API; not readable in-app
 }
 
 export interface MangaPage {

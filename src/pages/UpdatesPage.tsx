@@ -45,13 +45,15 @@ export default function UpdatesPage() {
       const metas = await getChapterMetas(entry.key);
       const states = await getChapterStates(entry.key);
       const readKeys = new Set(states.filter((s) => s.read).map((s) => s.key));
-      const unread = metas.filter((m) => !readKeys.has(m.key)).length;
+      const unread = metas.filter(
+        (m) => !m.chapter.external && !readKeys.has(m.key),
+      ).length;
       const sourceOk = !!getSource(sourceId) && stored.sourceAvailable;
 
       rows.push({
         mangaKey: entry.key,
         manga: stored.manga,
-        totalChapters: metas.length,
+        totalChapters: metas.filter((m) => !m.chapter.external).length,
         unread,
         sourceOk,
       });
@@ -98,7 +100,9 @@ export default function UpdatesPage() {
         const before = await getChapterMetas(key);
         const beforeIds = new Set(before.map((m) => m.chapter.id));
         const fresh = await source.getChapterList(mangaId);
-        const newOnes = fresh.filter((c) => !beforeIds.has(c.id));
+        const newOnes = fresh.filter(
+          (c) => !c.external && !beforeIds.has(c.id),
+        );
 
         if (newOnes.length > 0) {
           await putChapterMetas(sourceId, mangaId, fresh);
