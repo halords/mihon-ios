@@ -99,8 +99,14 @@ button {
   inset: 0;
   z-index: 20;
   min-height: 0;
-  overflow: auto;
+  /* Reader-only surface: strictly vertical scrolling. Horizontal scroll
+     is locked so fit-to-width pages can never drift sideways; horizontal
+     pan exists only inside the paged zoom layer (touch-action: none). */
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior-x: none;
   overscroll-behavior-y: contain;
+  touch-action: pan-y;
   padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 16px);
   background: var(--bg);
   -webkit-overflow-scrolling: touch;
@@ -456,12 +462,31 @@ textarea { width: 100%; resize: vertical; }
   padding: 0;
 }
 
-.reader-pages { margin-inline: -16px; }
+/* No negative margins: .screen--full has no horizontal padding to bleed
+   through, so the old -16px trick made the strip 32px wider than the
+   viewport — that overflow WAS the sideways drift. The strip is exactly
+   container width; pages are full-bleed at width: 100%. */
+.reader-pages {
+  margin-inline: 0;
+  max-width: 100%;
+  touch-action: pan-y;
+}
 .reader-pages img {
   width: 100%;
+  max-width: 100%;
   height: auto;
   display: block;
   content-visibility: auto;
+}
+
+/* Slim separator between chapters in the continuous webtoon flow. */
+.chapter-divider {
+  padding: 30px 16px 22px;
+  text-align: center;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--dim);
 }
 
 .tapzones {
