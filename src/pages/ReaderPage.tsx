@@ -116,6 +116,18 @@ export default function ReaderPage({
   const lastProgressTimeRef = useRef(-Infinity);
   const writesRef = useRef<Promise<void>>(Promise.resolve());
 
+  // Floating reader chrome: shown briefly on chapter entry, toggled by a
+  // center tap, and auto-hidden after ~3s without interaction (Mihon-style).
+  useEffect(() => {
+    if (!showBar) return;
+    const timer = window.setTimeout(() => setShowBar(false), 3000);
+    return () => window.clearTimeout(timer);
+  }, [showBar, expectedKey]);
+
+  const toggleChrome = useCallback(() => {
+    setShowBar((visible) => !visible);
+  }, []);
+
   const { data, loading, error, reload } = useLoad<ReaderData>(
     async () => {
       const source = getSource(sourceId);
@@ -363,6 +375,11 @@ export default function ReaderPage({
       return;
     }
 
+    // Scrolling hides the floating chrome.
+    if (showBar) {
+      setShowBar(false);
+    }
+
     const images = pagesRef.current?.querySelectorAll<HTMLImageElement>('img');
     if (!images?.length) {
       return;
@@ -382,10 +399,62 @@ export default function ReaderPage({
     recordProgress(currentPage);
   }
 
+  // Tap zones for the webtoon (scrolling) mode — paged mode has its own
+  // invisible zone buttons. Center toggles the chrome; left/right taps
+  // page through the chapter by most of a viewport, Mihon-style. Taps on
+  // actual controls (buttons, inputs, the chrome itself) are ignored.
+  function handleTapZones(event: React.MouseEvent<HTMLDivElement>): void {
+    const target = event.target as HTMLElement;
+    if (target.closest('button, a, input, select, [data-chrome]')) {
+      return;
+    }
+
+    const x = event.clientX / Math.max(1, window.innerWidth);
+
+    if (x >= 0.35 && x <= 0.65) {
+      toggleChrome();
+      return;
+    }
+
+    setShowBar(false);
+
+    if (mode === 'vertical') {
+      const screen = screenRef.current;
+      if (!screen) return;
+      const delta = window.innerHeight * 0.8;
+      screen.scrollBy({ top: x < 0.35 ? -delta : delta, behavior: 'smooth' });
+    }
+  }
+
+  function seekToPage(index: number): void {
+    if (!reader || reader.pages.length === 0) {
+      return;
+    }
+
+    const target = clampPage(index, reader.pages.length);
+    pageRef.current = target;
+    setPage(target);
+    setFinished(false);
+    recordProgress(target, true);
+
+    if (mode === 'vertical') {
+      restoringRef.current = true;
+      pagesRef.current
+        ?.querySelectorAll<HTMLImageElement>('img')
+        .item(target)
+        ?.scrollIntoView({ block: 'start', behavior: 'instant' });
+      window.requestAnimationFrame(() => {
+        restoringRef.current = false;
+      });
+    }
+  }
+
   function prevPage(): void {
     if (!reader || reader.pages.length === 0) {
       return;
     }
+
+    setShowBar(false);
 
     const previous = clampPage(pageRef.current - 1, reader.pages.length);
     pageRef.current = previous;
@@ -398,6 +467,8 @@ export default function ReaderPage({
     if (!reader || reader.pages.length === 0) {
       return;
     }
+
+    setShowBar(false);
 
     if (pageRef.current >= reader.pages.length - 1) {
       recordProgress(pageRef.current, true);
@@ -539,8 +610,9 @@ export default function ReaderPage({
       className="screen--full"
       ref={screenRef}
       onScroll={handleScroll}
+      onClick={handleTapZones}
       style={{
-        overflow: mode === 'paged' ? 'hidden' : 'auto',
+        overflow: 'auto',
         overscrollBehavior: 'contain',
         scrollBehavior: 'auto',
         ...(mode === 'paged' ? { background: '#000', color: '#fff' } : {}),
@@ -572,76 +644,87 @@ export default function ReaderPage({
         />
       </div>
 
-      {(mode === 'vertical' || showBar) && (
+      {/* Floating chrome — overlays the pages, hidden while reading. */}
+      <div
+        data-chrome
+        className="reader-chrome reader-chrome--top"
+        style={{
+          opacity: showBar ? 1 : 0,
+          visibility: showBar ? 'visible' : 'hidden',
+          pointerEvents: showBar ? 'auto' : 'none',
+        }}
+      >
+        <button
+          type="button"
+          className="btn btn-ghost"
+          onClick={() => nav.back()}
+        >
+          Back
+        </button>
+
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div
+            style={{
+              fontSize: 12,
+              opacity: 0.7,
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {reader.manga.title}
+          </div>
+          <div
+            style={{
+              fontWeight: 600,
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {reader.current.name}
+          </div>
+        </div>
+      </div>
+
+      {pageCount > 0 && (
         <div
-          className="topbar"
+          data-chrome
+          className="reader-chrome reader-chrome--bottom"
           style={{
-            position: mode === 'vertical' ? 'sticky' : 'absolute',
-            top: 0,
-            left: 0,
-            right: 0,
-            zIndex: 101,
-            display: 'flex',
-            alignItems: 'center',
-            gap: 12,
-            paddingTop: 'max(8px, env(safe-area-inset-top, 0px))',
-            ...(mode === 'paged'
-              ? { background: 'rgba(0, 0, 0, 0.88)', color: '#fff' }
-              : { background: 'var(--bg, Canvas)' }),
+            opacity: showBar ? 1 : 0,
+            visibility: showBar ? 'visible' : 'hidden',
+            pointerEvents: showBar ? 'auto' : 'none',
           }}
         >
+          <span
+            style={{
+              fontSize: 13,
+              fontVariantNumeric: 'tabular-nums',
+              flexShrink: 0,
+              minWidth: 64,
+            }}
+          >
+            {displayedPage} / {pageCount}
+          </span>
+          <input
+            type="range"
+            aria-label="Seek to page"
+            min={1}
+            max={pageCount}
+            value={displayedPage}
+            onChange={(event) => seekToPage(Number(event.target.value) - 1)}
+            style={{ flex: 1, minWidth: 0, minHeight: 32 }}
+          />
           <button
             type="button"
             className="btn btn-ghost"
-            onClick={() => nav.back()}
+            onClick={toggleMode}
+            aria-label={`Switch to ${mode === 'vertical' ? 'paged' : 'vertical'} mode`}
+            style={{ flexShrink: 0 }}
           >
-            Back
+            {mode === 'vertical' ? 'Vertical' : 'Paged'}
           </button>
-
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div
-              style={{
-                fontSize: 12,
-                opacity: 0.65,
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                whiteSpace: 'nowrap',
-              }}
-            >
-              {reader.manga.title}
-            </div>
-            <div
-              style={{
-                fontWeight: 600,
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                whiteSpace: 'nowrap',
-              }}
-            >
-              {reader.current.name}
-            </div>
-          </div>
-
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 8,
-              flexShrink: 0,
-            }}
-          >
-            <span style={{ fontSize: 13, fontVariantNumeric: 'tabular-nums' }}>
-              {displayedPage} / {pageCount}
-            </span>
-            <button
-              type="button"
-              className="btn btn-ghost"
-              onClick={toggleMode}
-              aria-label={`Switch to ${mode === 'vertical' ? 'paged' : 'vertical'} mode`}
-            >
-              {mode === 'vertical' ? 'Vertical' : 'Paged'}
-            </button>
-          </div>
         </div>
       )}
 
@@ -674,9 +757,9 @@ export default function ReaderPage({
                 style={{
                   display: 'block',
                   margin: '0 auto',
+                  width: '100%',
                   maxWidth: '100%',
                   height: 'auto',
-                  scrollMarginTop: 72,
                 }}
               />
             ))}
@@ -686,50 +769,48 @@ export default function ReaderPage({
       ) : finished ? (
         <div
           style={{
-            position: 'absolute',
-            inset: 0,
-            overflowY: 'auto',
+            minHeight: '100%',
             display: 'grid',
             alignItems: 'center',
-            paddingTop: 88,
             boxSizing: 'border-box',
           }}
         >
           {chapterEnd}
         </div>
       ) : (
-        <div
-          style={{
-            position: 'absolute',
-            inset: 0,
-            display: 'flex',
-            justifyContent: 'center',
-            alignItems: 'center',
-            background: '#000',
-          }}
-        >
-          <img referrerPolicy="no-referrer"
-            key={`${reader.cKey}:${page}`}
-            src={reader.pages[page]}
-            alt={`Page ${page + 1}`}
-            loading="eager"
+        <>
+          {/* Paged mode: fit to width, centered vertically via margin
+              auto; pages taller than the viewport extend naturally and
+              the reader surface scrolls. */}
+          <div
             style={{
-              display: 'block',
-              width: '100%',
-              height: '100%',
-              maxWidth: '100%',
-              maxHeight: '100%',
-              objectFit: 'contain',
+              minHeight: '100%',
+              display: 'flex',
+              background: '#000',
             }}
-          />
+          >
+            <img referrerPolicy="no-referrer"
+              key={`${reader.cKey}:${page}`}
+              src={reader.pages[page]}
+              alt={`Page ${page + 1}`}
+              loading="eager"
+              style={{
+                display: 'block',
+                width: '100%',
+                height: 'auto',
+                margin: 'auto',
+              }}
+            />
+          </div>
           <button
             type="button"
             aria-label="Previous page"
             onClick={prevPage}
             style={{
-              position: 'absolute',
+              position: 'fixed',
               inset: '0 auto 0 0',
               width: '30%',
+              zIndex: 60,
               border: 0,
               padding: 0,
               background: 'transparent',
@@ -741,11 +822,12 @@ export default function ReaderPage({
             type="button"
             aria-label={showBar ? 'Hide reader controls' : 'Show reader controls'}
             aria-pressed={showBar}
-            onClick={() => setShowBar((visible) => !visible)}
+            onClick={toggleChrome}
             style={{
-              position: 'absolute',
+              position: 'fixed',
               inset: '0 auto 0 30%',
               width: '40%',
+              zIndex: 60,
               border: 0,
               padding: 0,
               background: 'transparent',
@@ -758,9 +840,10 @@ export default function ReaderPage({
             aria-label="Next page"
             onClick={nextPage}
             style={{
-              position: 'absolute',
+              position: 'fixed',
               inset: '0 0 0 70%',
               width: '30%',
+              zIndex: 60,
               border: 0,
               padding: 0,
               background: 'transparent',
@@ -768,7 +851,7 @@ export default function ReaderPage({
               touchAction: 'manipulation',
             }}
           />
-        </div>
+        </>
       )}
     </div>
   );

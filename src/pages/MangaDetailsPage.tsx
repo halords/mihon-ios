@@ -3,6 +3,7 @@ import {
   addToLibrary,
   getChapterMetas,
   getChapterStates,
+  getHistory,
   getLibraryEntry,
   getManga,
   putChapterMetas,
@@ -10,6 +11,7 @@ import {
   removeFromLibrary,
   setLibraryCategory,
   type ChapterStateRecord,
+  type HistoryRecord,
 } from '../lib/db';
 import { useNav } from '../lib/nav';
 import { useLoad } from '../lib/useLoad';
@@ -109,11 +111,18 @@ export function MangaDetailsPage({ mangaKey }: { mangaKey: string }) {
     }
 
     const entry = await getLibraryEntry(mangaKey);
+    // Reading history for THIS manga (getHistory returns newest first) —
+    // the same records the History tab shows; used to find the chapter
+    // the user was last in the middle of.
+    const history = (await getHistory()).filter(
+      (record) => record.mangaKey === mangaKey,
+    );
 
     return {
       manga: details,
       chapters: [...chapters].sort((a, b) => a.number - b.number),
       stateByKey,
+      history,
       inLibrary: !!entry,
       category: entry?.category,
       sourceOk,
@@ -166,7 +175,8 @@ export function MangaDetailsPage({ mangaKey }: { mangaKey: string }) {
     );
   }
 
-  const { manga, chapters, stateByKey, inLibrary, category, sourceOk } = data;
+  const { manga, chapters, stateByKey, history, inLibrary, category, sourceOk } =
+    data;
   const sourceName = getSource(sourceId)?.name ?? sourceId;
   const creators = [manga.author, manga.artist].filter(Boolean).join(' / ');
   // External chapters are listed for honesty but are not readable in-app:
@@ -176,9 +186,56 @@ export function MangaDetailsPage({ mangaKey }: { mangaKey: string }) {
   const firstUnread = readableChapters.find(
     (chapter) => !stateByKey[chapterKey(sourceId, mangaId, chapter.id)]?.read,
   );
-  const anyRead = chapters.some(
-    (chapter) => stateByKey[chapterKey(sourceId, mangaId, chapter.id)]?.read,
+
+  // History-driven resume: the most recently read chapter (per history)
+  // that is still mid-chapter — has saved page progress and is not marked
+  // read — is where "Continue reading" lands. The reader resumes it at
+  // the saved page (state.lastPage).
+  const readableById = new Map(
+    readableChapters.map((chapter) => [chapter.id, chapter]),
   );
+  let inProgress: { chapter: SChapter; page: number } | undefined;
+  for (const record of history as HistoryRecord[]) {
+    const chapterId = record.key.slice(mangaKey.length + 2);
+    const chapter = readableById.get(chapterId);
+    if (!chapter) continue;
+    const state = stateByKey[record.key];
+    if (!state || state.read) continue;
+    const page = Math.max(state.lastPage, record.page ?? 0);
+    if (page > 0) {
+      inProgress = { chapter, page };
+      break;
+    }
+  }
+  if (!inProgress) {
+    // History was cleared but progress remains: fall back to the most
+    // advanced readable chapter with unsaved-finished progress.
+    const candidates = readableChapters.filter((chapter) => {
+      const state =
+        stateByKey[chapterKey(sourceId, mangaId, chapter.id)];
+      return !!state && !state.read && state.lastPage > 0;
+    });
+    const last = candidates[candidates.length - 1];
+    if (last) {
+      inProgress = {
+        chapter: last,
+        page: stateByKey[chapterKey(sourceId, mangaId, last.id)].lastPage,
+      };
+    }
+  }
+  const anyProgress = readableChapters.some((chapter) => {
+    const state = stateByKey[chapterKey(sourceId, mangaId, chapter.id)];
+    return !!state && (state.read || state.lastPage > 0);
+  });
+  // Primary read action: in-progress chapter wins, else first unread.
+  const readTarget = inProgress?.chapter ?? firstUnread;
+  const readLabel = !readTarget
+    ? 'All caught up'
+    : inProgress
+      ? `Continue reading — ${inProgress.chapter.name} · Page ${inProgress.page + 1}`
+      : anyProgress
+        ? `Continue reading — ${firstUnread?.name}`
+        : `Start reading — ${firstUnread?.name}`;
   const anyDownloaded = chapters.some(
     (chapter) => stateByKey[chapterKey(sourceId, mangaId, chapter.id)]?.downloaded,
   );
@@ -243,6 +300,58 @@ export function MangaDetailsPage({ mangaKey }: { mangaKey: string }) {
         </div>
       </div>
 
+      {/* Primary actions — directly under the header, never below the fold */}
+      <div
+        style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 16 }}
+      >
+        {readableChapters.length > 0 && (
+          <button
+            type="button"
+            className="btn"
+            style={{ flex: '1 1 100%', minHeight: 48 }}
+            disabled={!sourceOk || !readTarget}
+            onClick={() => {
+              if (sourceOk && readTarget) {
+                openReader(mangaKey, readTarget.id);
+              }
+            }}
+          >
+            {readLabel}
+          </button>
+        )}
+
+        {inLibrary ? (
+          <button
+            type="button"
+            className="btn"
+            disabled={mutating}
+            aria-haspopup="dialog"
+            aria-expanded={showSheet}
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+            onClick={() => {
+              setActionError(null);
+              setShowSheet(true);
+            }}
+          >
+            <HeartIcon filled />
+            In Library · {category ?? 'Default'}
+          </button>
+        ) : (
+          <button
+            type="button"
+            className="btn"
+            disabled={mutating}
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+            onClick={() => {
+              void updateLibrary(() => addToLibrary(mangaKey, 'Default'));
+            }}
+          >
+            <HeartIcon filled={false} />
+            Add to Library
+          </button>
+        )}
+      </div>
+
       {manga.genres.length > 0 && (
         <div
           style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 12 }}
@@ -284,58 +393,6 @@ export function MangaDetailsPage({ mangaKey }: { mangaKey: string }) {
       >
         {expanded ? 'Less' : 'More'}
       </button>
-
-      <div
-        style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 16 }}
-      >
-        {readableChapters.length > 0 && (
-          <button
-            type="button"
-            className="btn"
-            disabled={!sourceOk || !firstUnread}
-            onClick={() => {
-              if (sourceOk && firstUnread) {
-                openReader(mangaKey, firstUnread.id);
-              }
-            }}
-          >
-            {firstUnread
-              ? `${anyRead ? 'Continue' : 'Start reading'} — ${firstUnread.name}`
-              : 'All caught up'}
-          </button>
-        )}
-
-        {inLibrary ? (
-          <button
-            type="button"
-            className="btn"
-            disabled={mutating}
-            aria-haspopup="dialog"
-            aria-expanded={showSheet}
-            style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
-            onClick={() => {
-              setActionError(null);
-              setShowSheet(true);
-            }}
-          >
-            <HeartIcon filled />
-            In Library · {category ?? 'Default'}
-          </button>
-        ) : (
-          <button
-            type="button"
-            className="btn"
-            disabled={mutating}
-            style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
-            onClick={() => {
-              void updateLibrary(() => addToLibrary(mangaKey, 'Default'));
-            }}
-          >
-            <HeartIcon filled={false} />
-            Add to Library
-          </button>
-        )}
-      </div>
 
       {actionError !== null && !showSheet && (
         <p className="error" role="alert">
@@ -412,6 +469,12 @@ export function MangaDetailsPage({ mangaKey }: { mangaKey: string }) {
                       <div>{chapter.name}</div>
                       <small style={{ color: 'var(--dim)' }}>
                         {new Date(chapter.dateUpload).toLocaleDateString()}
+                        {!isExternal &&
+                        state &&
+                        !state.read &&
+                        state.lastPage > 0
+                          ? ` · Page ${state.lastPage + 1}`
+                          : ''}
                       </small>
                     </div>
                     {isExternal && <span className="chip">External</span>}

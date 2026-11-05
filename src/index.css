@@ -66,6 +66,15 @@ img { height: auto; }
   outline-offset: 3px;
 }
 
+/* No blue outline flash on tap/click focus — keyboard focus only. */
+:focus:not(:focus-visible) {
+  outline: none;
+}
+
+button {
+  -webkit-tap-highlight-color: transparent;
+}
+
 ::selection {
   background: var(--accent);
   color: var(--accent-text);
@@ -104,7 +113,7 @@ img { height: auto; }
   display: flex;
   align-items: center;
   gap: 12px;
-  min-height: 64px;
+  min-height: 60px;
   margin: calc(0px - env(safe-area-inset-top, 0px)) -16px 16px;
   padding: calc(12px + env(safe-area-inset-top, 0px)) 16px 12px;
   border-bottom: 1px solid var(--border);
@@ -117,7 +126,7 @@ img { height: auto; }
 .topbar h1 {
   flex: 1;
   min-width: 0;
-  font-size: 22px;
+  font-size: 20px;
   font-weight: 700;
   line-height: 1.25;
   overflow-wrap: anywhere;
@@ -164,6 +173,14 @@ img { height: auto; }
 .tabbar button svg { flex-shrink: 0; width: 24px; height: 24px; }
 .tabbar button:focus-visible { outline-offset: -4px; }
 
+/* Manga items: long-press opens the action sheet, so suppress the iOS
+   touch callout and text selection while pressing. */
+.manga-pressable {
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
 /* Buttons, labels, and content containers */
 .btn, .btn-ghost, .btn-danger {
   display: inline-flex;
@@ -194,12 +211,12 @@ img { height: auto; }
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 5px 10px;
-  border: 1px solid var(--border);
+  padding: 4px 9px;
+  border: 1px solid transparent;
   border-radius: 999px;
   background: var(--surface2);
   color: var(--dim);
-  font-size: 12px;
+  font-size: 11.5px;
 }
 
 .chip.active {
@@ -207,19 +224,26 @@ img { height: auto; }
   color: var(--accent);
 }
 
+/* Chips used as buttons (category tabs) keep a comfortable touch target. */
+button.chip {
+  min-height: 36px;
+  padding-inline: 12px;
+}
+
 .badge {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 22px;
-  min-height: 22px;
-  padding: 2px 7px;
+  min-width: 20px;
+  min-height: 20px;
+  padding: 2px 6px;
   border-radius: 999px;
   background: var(--accent);
   color: var(--accent-text);
-  font-size: 12px;
+  font-size: 11.5px;
   font-weight: 700;
   line-height: 1.2;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
 }
 
 .card {
@@ -235,7 +259,7 @@ img { height: auto; }
   align-items: center;
   gap: 12px;
   min-height: 56px;
-  padding: 10px 0;
+  padding: 12px 0;
   border-bottom: 1px solid var(--border);
 }
 
@@ -245,18 +269,28 @@ img { height: auto; }
 .grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(108px, 1fr));
-  gap: 12px;
+  gap: 20px 14px;
 }
 
 .grid > * { min-width: 0; }
 
+/* Grid items are cover + title, not boxed cards. */
+.grid > .card {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
 .cover {
   display: block;
   width: 100%;
-  aspect-ratio: 3 / 4;
+  aspect-ratio: 2 / 3;
   object-fit: cover;
-  border-radius: var(--radius);
+  border-radius: 10px;
   background: var(--surface2);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
 }
 
 /* Loading, empty, and error states */
@@ -377,6 +411,51 @@ textarea { width: 100%; resize: vertical; }
 .menu-sheet h2 { margin-bottom: 12px; font-size: 18px; }
 
 /* Reader helpers */
+/* Floating reader chrome: overlays the pages, fades in/out, respects the
+   iOS safe areas. Always dark/translucent regardless of app theme. */
+.reader-chrome {
+  position: fixed;
+  right: 0;
+  left: 0;
+  z-index: 103;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: #fff;
+  background: rgba(12, 12, 14, 0.78);
+  -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: blur(14px);
+  transition: opacity 0.2s ease, visibility 0.2s ease;
+}
+
+.reader-chrome--top {
+  top: 0;
+  padding: calc(10px + env(safe-area-inset-top, 0px)) 16px 10px;
+  background: linear-gradient(
+    rgba(12, 12, 14, 0.85),
+    rgba(12, 12, 14, 0.65) 70%,
+    rgba(12, 12, 14, 0)
+  );
+}
+
+.reader-chrome--bottom {
+  bottom: 0;
+  padding: 10px 16px calc(10px + env(safe-area-inset-bottom, 0px));
+  background: linear-gradient(
+    rgba(12, 12, 14, 0),
+    rgba(12, 12, 14, 0.65) 30%,
+    rgba(12, 12, 14, 0.85)
+  );
+}
+
+.reader-chrome .btn-ghost { color: #fff; min-height: 40px; }
+.reader-chrome input[type="range"] {
+  border: 0;
+  background: transparent;
+  accent-color: var(--accent);
+  padding: 0;
+}
+
 .reader-pages { margin-inline: -16px; }
 .reader-pages img {
   width: 100%;

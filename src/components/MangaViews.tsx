@@ -1,4 +1,10 @@
-import type { CSSProperties } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  type CSSProperties,
+  type ReactNode,
+} from "react";
 import { cdnUrl } from '../lib/fetchJson';
 import type { SManga } from "../sources/Source";
 
@@ -35,16 +41,8 @@ const titleStyle: CSSProperties = {
   overflow: "hidden",
   overflowWrap: "anywhere",
   fontWeight: 600,
-};
-
-const menuButtonStyle: CSSProperties = {
-  width: 30,
-  height: 30,
-  padding: 0,
-  borderRadius: "50%",
-  flexShrink: 0,
-  fontSize: 22,
-  lineHeight: 1,
+  fontSize: "0.95rem",
+  lineHeight: 1.3,
 };
 
 function coverUrl(manga: SManga): string | undefined {
@@ -125,6 +123,105 @@ function NoSourceChip() {
   );
 }
 
+const LONG_PRESS_MS = 500;
+const LONG_PRESS_MOVE_TOLERANCE_PX = 10;
+
+/**
+ * Press handling for a manga item, Mihon-style: a normal tap opens the
+ * manga; a long-press (~500ms without scrolling) opens the action sheet
+ * instead and swallows the click that follows. Moving more than ~10px
+ * (i.e. the user is scrolling) or a pointercancel cancels the timer, so
+ * long-pressing mid-scroll never fires. Right-click / contextmenu also
+ * opens the sheet where a source is available.
+ */
+function useItemPress(
+  itemKey: string,
+  onOpen: (key: string) => void,
+  onMenu: ((key: string) => void) | undefined,
+) {
+  const timerRef = useRef<number | null>(null);
+  const startRef = useRef<{ x: number; y: number } | null>(null);
+  const firedRef = useRef(false);
+
+  const cancelTimer = useCallback(() => {
+    if (timerRef.current !== null) {
+      window.clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+  }, []);
+
+  useEffect(() => cancelTimer, [cancelTimer]);
+
+  return {
+    onPointerDown(event: React.PointerEvent) {
+      if (!onMenu) return;
+      firedRef.current = false;
+      startRef.current = { x: event.clientX, y: event.clientY };
+      cancelTimer();
+      timerRef.current = window.setTimeout(() => {
+        timerRef.current = null;
+        firedRef.current = true;
+        onMenu(itemKey);
+      }, LONG_PRESS_MS);
+    },
+    onPointerMove(event: React.PointerEvent) {
+      const start = startRef.current;
+      if (!start || timerRef.current === null) return;
+      if (
+        Math.hypot(event.clientX - start.x, event.clientY - start.y) >
+        LONG_PRESS_MOVE_TOLERANCE_PX
+      ) {
+        cancelTimer();
+      }
+    },
+    onPointerUp: cancelTimer,
+    onPointerCancel: cancelTimer,
+    onPointerLeave: cancelTimer,
+    onContextMenu(event: React.MouseEvent) {
+      if (!onMenu) return;
+      event.preventDefault();
+      cancelTimer();
+      firedRef.current = true;
+      onMenu(itemKey);
+    },
+    onClick() {
+      if (firedRef.current) {
+        firedRef.current = false;
+        return;
+      }
+      onOpen(itemKey);
+    },
+  };
+}
+
+function ItemButton({
+  item,
+  onOpen,
+  onMenu,
+  style,
+  children,
+}: {
+  item: MangaListItem;
+  onOpen: (key: string) => void;
+  onMenu?: (key: string) => void;
+  style?: CSSProperties;
+  children: ReactNode;
+}) {
+  const handlers = useItemPress(item.key, onOpen, onMenu);
+  return (
+    <button
+      type="button"
+      className="btn-ghost manga-pressable"
+      style={style}
+      aria-label={`Open ${item.manga.title}`}
+      aria-haspopup={onMenu ? "dialog" : undefined}
+      {...handlers}
+    >
+      {children}
+    </button>
+  );
+}
+
 export function MangaGrid({ items, onOpen, onMenu }: MangaViewProps) {
   return (
     <div className="grid">
@@ -134,12 +231,11 @@ export function MangaGrid({ items, onOpen, onMenu }: MangaViewProps) {
           className="card"
           style={{ position: "relative", overflow: "hidden" }}
         >
-          <button
-            type="button"
-            className="btn-ghost"
+          <ItemButton
+            item={item}
+            onOpen={onOpen}
+            onMenu={onMenu}
             style={openButtonStyle}
-            onClick={() => onOpen(item.key)}
-            aria-label={`Open ${item.manga.title}`}
           >
             <span style={{ display: "block", position: "relative" }}>
               <img referrerPolicy="no-referrer"
@@ -170,45 +266,23 @@ export function MangaGrid({ items, onOpen, onMenu }: MangaViewProps) {
                 </span>
               )}
             </span>
-            <span style={{ display: "block", padding: 8 }}>
+            <span style={{ display: "block", padding: "10px 2px 0" }}>
               <span style={titleStyle}>{item.manga.title}</span>
               {item.sourceMissing && <NoSourceChip />}
               {item.manga.author && (
                 <span
                   style={{
                     display: "block",
-                    marginTop: 4,
-                    fontSize: "0.8rem",
-                    opacity: 0.65,
+                    marginTop: 3,
+                    fontSize: "0.78rem",
+                    opacity: 0.6,
                   }}
                 >
                   {item.manga.author}
                 </span>
               )}
             </span>
-          </button>
-          {onMenu && (
-            <button
-              type="button"
-              className="btn btn-ghost"
-              style={{
-                ...menuButtonStyle,
-                position: "absolute",
-                top: 6,
-                left: 6,
-                background: "rgba(0, 0, 0, 0.55)",
-                color: "#fff",
-              }}
-              aria-label={`Options for ${item.manga.title}`}
-              aria-haspopup="dialog"
-              onClick={(event) => {
-                event.stopPropagation();
-                onMenu(item.key);
-              }}
-            >
-              ⋮
-            </button>
-          )}
+          </ItemButton>
         </div>
       ))}
     </div>
@@ -224,9 +298,10 @@ export function MangaList({ items, onOpen, onMenu }: MangaViewProps) {
           className="list-row"
           style={{ display: "flex", alignItems: "center", gap: 12 }}
         >
-          <button
-            type="button"
-            className="btn-ghost"
+          <ItemButton
+            item={item}
+            onOpen={onOpen}
+            onMenu={onMenu}
             style={{
               ...openButtonStyle,
               display: "flex",
@@ -235,8 +310,6 @@ export function MangaList({ items, onOpen, onMenu }: MangaViewProps) {
               flex: 1,
               minWidth: 0,
             }}
-            onClick={() => onOpen(item.key)}
-            aria-label={`Open ${item.manga.title}`}
           >
             <img referrerPolicy="no-referrer"
               className="cover"
@@ -257,9 +330,9 @@ export function MangaList({ items, onOpen, onMenu }: MangaViewProps) {
               <span
                 style={{
                   display: "block",
-                  marginTop: 4,
-                  fontSize: "0.8rem",
-                  opacity: 0.65,
+                  marginTop: 3,
+                  fontSize: "0.78rem",
+                  opacity: 0.6,
                 }}
               >
                 {[item.manga.author, item.manga.status]
@@ -282,22 +355,7 @@ export function MangaList({ items, onOpen, onMenu }: MangaViewProps) {
                 {item.unread}
               </span>
             )}
-          </button>
-          {onMenu && (
-            <button
-              type="button"
-              className="btn btn-ghost"
-              style={menuButtonStyle}
-              aria-label={`Options for ${item.manga.title}`}
-              aria-haspopup="dialog"
-              onClick={(event) => {
-                event.stopPropagation();
-                onMenu(item.key);
-              }}
-            >
-              ⋮
-            </button>
-          )}
+          </ItemButton>
         </div>
       ))}
     </div>
