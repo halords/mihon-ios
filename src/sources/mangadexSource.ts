@@ -319,8 +319,17 @@ export const mangadexSource: Source = {
     }
 
     // Do not return image URLs on hosts outside this adapter's allowlist.
-    const origin = new URL(baseUrl).origin;
-    if (origin !== BASE && origin !== UPLOADS) {
+    // At-home nodes live on rotating *.mangadex.network hosts (verified live
+    // 2026-11-05), so allow the mangadex.org / mangadex.network domains.
+    const pageHost = new URL(baseUrl);
+    const host = pageHost.hostname;
+    const hostAllowed =
+      pageHost.protocol === 'https:' &&
+      (host === 'mangadex.org' ||
+        host.endsWith('.mangadex.org') ||
+        host === 'mangadex.network' ||
+        host.endsWith('.mangadex.network'));
+    if (!hostAllowed) {
       throw new Error('MangaDex returned a page host that is not allowed');
     }
 
