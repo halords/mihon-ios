@@ -1,6 +1,7 @@
 import { useNav } from '../lib/nav';
 import { useLoad } from '../lib/useLoad';
 import { getHistory, clearHistory } from '../lib/db';
+import { cdnUrl } from '../lib/fetchJson';
 
 export default function HistoryPage() {
   const nav = useNav();
@@ -53,7 +54,7 @@ export default function HistoryPage() {
               <div className="list-row" key={record.key}>
                 {record.coverUrl ? (
                   <img referrerPolicy="no-referrer"
-                    src={record.coverUrl}
+                    src={cdnUrl(record.coverUrl)}
                     alt=""
                     width={40}
                     style={{ flexShrink: 0 }}

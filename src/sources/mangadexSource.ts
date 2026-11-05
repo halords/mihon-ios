@@ -1,4 +1,4 @@
-import { fetchJson } from '../lib/fetchJson';
+import { cdnUrl, fetchJson } from '../lib/fetchJson';
 import type {
   MangaPage,
   MangaStatus,
@@ -334,7 +334,7 @@ export const mangadexSource: Source = {
     }
 
     return files.map((f) => ({
-      imageUrl: `${baseUrl}/data/${hash}/${f}`,
+      imageUrl: cdnUrl(`${baseUrl}/data/${hash}/${f}`),
     }));
   },
 };

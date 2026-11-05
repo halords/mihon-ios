@@ -1,4 +1,5 @@
 import type { CSSProperties } from "react";
+import { cdnUrl } from '../lib/fetchJson';
 import type { SManga } from "../sources/Source";
 
 export interface MangaListItem {
@@ -50,7 +51,7 @@ function coverUrl(manga: SManga): string | undefined {
     return manga.thumbnailUrl || undefined;
   }
   if ("coverUrl" in manga && typeof manga.coverUrl === "string") {
-    return manga.coverUrl || undefined;
+    return manga.coverUrl ? cdnUrl(manga.coverUrl) : undefined;
   }
   if ("thumbnail" in manga && typeof manga.thumbnail === "string") {
     return manga.thumbnail || undefined;

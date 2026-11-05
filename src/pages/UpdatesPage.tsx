@@ -10,6 +10,7 @@ import {
 } from '../lib/db';
 import type { SManga, SChapter } from '../sources/Source';
 import { getSource } from '../sources';
+import { cdnUrl } from '../lib/fetchJson';
 
 interface UpdateRow {
   mangaKey: string;
@@ -203,7 +204,7 @@ export default function UpdatesPage() {
               >
                 {row.manga.coverUrl ? (
                   <img referrerPolicy="no-referrer"
-                    src={row.manga.coverUrl}
+                    src={cdnUrl(row.manga.coverUrl)}
                     alt=""
                     width={40}
                     style={{ flexShrink: 0 }}

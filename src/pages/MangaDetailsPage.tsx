@@ -17,6 +17,7 @@ import DownloadButton from '../components/DownloadButton';
 import { deleteMangaDownloads } from '../lib/downloads';
 import { getSource } from '../sources';
 import {
+import { cdnUrl } from '../lib/fetchJson';
   CATEGORIES,
   chapterKey,
   type SChapter,
@@ -192,7 +193,7 @@ export function MangaDetailsPage({ mangaKey }: { mangaKey: string }) {
 
       <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
         <img referrerPolicy="no-referrer"
-          src={manga.coverUrl}
+          src={cdnUrl(manga.coverUrl)}
           alt={manga.title}
           style={{
             width: 112,
