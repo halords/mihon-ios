@@ -17,12 +17,12 @@ import DownloadButton from '../components/DownloadButton';
 import { deleteMangaDownloads } from '../lib/downloads';
 import { getSource } from '../sources';
 import {
-import { cdnUrl } from '../lib/fetchJson';
   CATEGORIES,
   chapterKey,
   type SChapter,
   type SManga,
 } from '../sources/Source';
+import { cdnUrl } from '../lib/fetchJson';
 
 export function MangaDetailsPage({ mangaKey }: { mangaKey: string }) {
   const { back, openReader } = useNav();
