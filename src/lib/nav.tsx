@@ -6,7 +6,8 @@ export type Route =
   | { name: 'tabs' }
   | { name: 'details'; mangaKey: string }
   | { name: 'reader'; mangaKey: string; chapterId: string }
-  | { name: 'settings' };
+  | { name: 'settings' }
+  | { name: 'extensions' };
 
 export interface Nav {
   tab: TabId;
@@ -15,6 +16,7 @@ export interface Nav {
   openManga(mangaKey: string): void;
   openReader(mangaKey: string, chapterId: string): void;
   openSettings(): void;
+  openExtensions(): void;
   back(): void;
 }
 
@@ -69,6 +71,13 @@ export function NavProvider({ children }: { children: ReactNode }) {
       }));
     },
 
+    openExtensions() {
+      setState((previous) => ({
+        ...previous,
+        route: { name: 'extensions' },
+      }));
+    },
+
     back() {
       setState((previous) => {
         switch (previous.route.name) {
@@ -89,6 +98,7 @@ export function NavProvider({ children }: { children: ReactNode }) {
             };
 
           case 'settings':
+          case 'extensions':
             return {
               ...previous,
               tab: 'more',

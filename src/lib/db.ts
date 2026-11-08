@@ -58,7 +58,24 @@ export interface BackupData {
   downloads: DownloadRecord[];
 }
 
+export interface InstalledPluginRecord {
+  id: string; // source id the plugin registers under (may be a Mihon numeric id)
+  name: string;
+  version: string;
+  lang?: string;
+  nsfw?: boolean;
+  moduleUrl: string; // absolute URL the code was fetched from
+  indexUrl: string; // extension index this plugin came from
+  code: string; // the module source, stored on-device
+  installedAt: number;
+  updatedAt: number;
+}
+
 export interface MihonDB extends DBSchema {
+  plugins: {
+    key: string;
+    value: InstalledPluginRecord;
+  };
   manga: {
     key: string;
     value: StoredManga;
@@ -92,27 +109,33 @@ let databasePromise: Promise<IDBPDatabase<MihonDB>> | undefined;
 
 export async function getDB(): Promise<IDBPDatabase<MihonDB>> {
   if (!databasePromise) {
-    databasePromise = openDB<MihonDB>('mihon-pwa', 1, {
-      upgrade(db) {
-        db.createObjectStore('manga', { keyPath: 'key' });
+    databasePromise = openDB<MihonDB>('mihon-pwa', 2, {
+      upgrade(db, oldVersion) {
+        if (oldVersion < 1) {
+          db.createObjectStore('manga', { keyPath: 'key' });
 
-        const chapterMeta = db.createObjectStore('chapterMeta', {
-          keyPath: 'key',
-        });
-        chapterMeta.createIndex('by-manga', 'mangaKey');
+          const chapterMeta = db.createObjectStore('chapterMeta', {
+            keyPath: 'key',
+          });
+          chapterMeta.createIndex('by-manga', 'mangaKey');
 
-        const chapterState = db.createObjectStore('chapterState', {
-          keyPath: 'key',
-        });
-        chapterState.createIndex('by-manga', 'mangaKey');
+          const chapterState = db.createObjectStore('chapterState', {
+            keyPath: 'key',
+          });
+          chapterState.createIndex('by-manga', 'mangaKey');
 
-        db.createObjectStore('library', { keyPath: 'key' });
-        db.createObjectStore('history', { keyPath: 'key' });
+          db.createObjectStore('library', { keyPath: 'key' });
+          db.createObjectStore('history', { keyPath: 'key' });
 
-        const downloads = db.createObjectStore('downloads', {
-          keyPath: 'key',
-        });
-        downloads.createIndex('by-manga', 'mangaKey');
+          const downloads = db.createObjectStore('downloads', {
+            keyPath: 'key',
+          });
+          downloads.createIndex('by-manga', 'mangaKey');
+        }
+
+        if (oldVersion < 2) {
+          db.createObjectStore('plugins', { keyPath: 'id' });
+        }
       },
     }).catch((error: unknown) => {
       databasePromise = undefined;
@@ -343,6 +366,23 @@ export async function deleteMangaData(mangaKey: string): Promise<void> {
       .map((record) => tx.objectStore('history').delete(record.key)),
     tx.done,
   ]);
+}
+
+export async function getInstalledPlugins(): Promise<InstalledPluginRecord[]> {
+  const db = await getDB();
+  return db.getAll('plugins');
+}
+
+export async function putInstalledPlugin(
+  record: InstalledPluginRecord,
+): Promise<void> {
+  const db = await getDB();
+  await db.put('plugins', record);
+}
+
+export async function deleteInstalledPlugin(id: string): Promise<void> {
+  const db = await getDB();
+  await db.delete('plugins', id);
 }
 
 export async function exportData(): Promise<BackupData> {

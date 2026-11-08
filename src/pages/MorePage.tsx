@@ -1,7 +1,7 @@
 import { useNav } from '../lib/nav';
 
 export default function MorePage() {
-  const { openSettings } = useNav();
+  const { openSettings, openExtensions } = useNav();
 
   return (
     <main className="screen">
@@ -9,6 +9,15 @@ export default function MorePage() {
         <h1>More</h1>
       </header>
       <div className="card">
+        <div className="list-row">
+          <button
+            type="button"
+            className="btn-ghost"
+            onClick={openExtensions}
+          >
+            Extensions
+          </button>
+        </div>
         <div className="list-row">
           <button
             type="button"

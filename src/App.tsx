@@ -14,6 +14,7 @@ import MorePage from './pages/MorePage';
 import MangaDetailsPage from './pages/MangaDetailsPage';
 import ReaderPage from './pages/ReaderPage';
 import SettingsPage from './pages/SettingsPage';
+import ExtensionsPage from './pages/ExtensionsPage';
 import './index.css';
 
 const tabPages = {
@@ -39,6 +40,10 @@ function Shell() {
 
   if (route.name === 'settings') {
     return <SettingsPage />;
+  }
+
+  if (route.name === 'extensions') {
+    return <ExtensionsPage />;
   }
 
   const ActiveTabPage = tabPages[tab];

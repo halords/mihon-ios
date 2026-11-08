@@ -7,6 +7,7 @@ export interface Settings {
   theme: ThemeName;
   proxyBase: string;
   libraryView: LibraryView;
+  extensionIndexes: string[];
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -14,6 +15,7 @@ export const DEFAULT_SETTINGS: Settings = {
   theme: 'dark',
   proxyBase: '',
   libraryView: 'grid',
+  extensionIndexes: [],
 };
 
 const STORAGE_KEY = 'mihon-settings';
@@ -44,6 +46,12 @@ function normalizeSettings(value: unknown): Settings {
       stored.libraryView === 'grid' || stored.libraryView === 'list'
         ? stored.libraryView
         : DEFAULT_SETTINGS.libraryView,
+    extensionIndexes: Array.isArray(stored.extensionIndexes)
+      ? stored.extensionIndexes.filter(
+          (value): value is string =>
+            typeof value === 'string' && value.length > 0,
+        )
+      : DEFAULT_SETTINGS.extensionIndexes,
   };
 }
 
