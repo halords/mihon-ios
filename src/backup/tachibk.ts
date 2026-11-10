@@ -66,9 +66,13 @@ async function parseInWorker(raw: Uint8Array): Promise<ParsedBackup> {
 }
 
 export async function inspectTachibkFile(file: Blob): Promise<TachibkPreview> {
-  if (!file.size) throw new Error('This backup is empty (0 bytes). Choose the original .tachibk file.');
-  if (file.size > 128 * 1024 * 1024) throw new Error('This backup exceeds the 128 MB file limit');
+  // Judge the file by the bytes actually read, never by Blob.size: Android
+  // file pickers (content:// providers, in-app WebViews) can report size 0
+  // for a perfectly valid backup, which used to reject real backups with a
+  // bogus "0 bytes" error before a single byte was read.
   const raw = new Uint8Array(await file.arrayBuffer());
+  if (!raw.length) throw new Error('This backup is empty (0 bytes). Choose the original .tachibk file.');
+  if (raw.length > 128 * 1024 * 1024) throw new Error('This backup exceeds the 128 MB file limit');
   const digest = await crypto.subtle.digest('SHA-256', blobPart(raw));
   const archiveId = [...new Uint8Array(digest)].map(v => v.toString(16).padStart(2, '0')).join('');
   const backup = await parseInWorker(raw);

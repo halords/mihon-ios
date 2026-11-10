@@ -2,6 +2,11 @@
 
 Updated 2026-11-10. Turso accounts and automatic library/history sync are implemented and deployed at `https://mihon-ios.vercel.app`. Chapter range selection, floating reading-state actions and compact migration branding remain included. Web adapters, sorting, Android extension management and current-state `.tachibk` export remain implemented. The user previously authorized committing and pushing verified changes to GitHub.
 
+## Backup import "0 bytes" fix (2026-11-10 evening)
+
+- `inspectTachibkFile` rejected valid backups on Android: it gated on `Blob.size` before reading any bytes, and Android file pickers (content:// providers, in-app WebViews) can report size 0 for an intact file — the user's real 1.6 MB backup (310 manga, 60,192 chapters) was refused as "empty (0 bytes)". The gate now reads the bytes first and judges emptiness / the 128 MB limit by `raw.length`; the parser/compression post-read checks are unchanged. Backup picker accept list also takes `.bin` / `application/octet-stream` for app-renamed backup files.
+- Regression test: a valid fixture whose `size` getter is forced to 0 now inspects successfully; a truly empty file still rejects with the same message. The user's actual `backup_0_3ind.bin` was verified end-to-end under the forced-size-0 condition (310 manga / 60,192 chapters / 20,007 history). Full unit run: 101/102 — the single failure is `browserBackend.test.ts`, which fails identically on the pristine tree (needs the live VPS browser service, unavailable in the sandbox). TypeScript clean, production build passes.
+
 ## Library performance and storage update
 
 - History uses an IndexedDB v7 compound date/key index and renders 40 records per page. Full-history search uses bounded bulk reads, short transactions and cancellation; it no longer loads every history record, chapter or download manifest into the screen. Date/time formatters are reused. Updates renders 20 entries per page and reads only those chapter states; older updates remain accessible.

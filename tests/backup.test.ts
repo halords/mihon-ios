@@ -46,6 +46,14 @@ describe('Mihon backup wire compatibility', () => {
     await expect(gunzipIfNeeded(new Uint8Array([31, 139, 0, 0]))).rejects.toThrow(/decompress/i);
     expect(new ProtoReader(varint(-1)).readInt64()).toBe(-1n);
   });
+  it('inspects a valid backup whose picker-reported size is 0', async () => {
+    // Android content:// pickers can hand back a File whose size reads 0
+    // while its bytes are intact — the gate must trust the bytes, not size.
+    const file = schemaFile();
+    Object.defineProperty(file, 'size', { get: () => 0 });
+    const preview = await inspectTachibkFile(file);
+    expect(preview.mangaCount).toBe(3);
+  });
 });
 describe('transactional Mihon migration', () => {
   it('uses category order before colliding category IDs, restores all memberships and retains original bytes', async () => {
