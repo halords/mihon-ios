@@ -138,7 +138,7 @@ export interface InstalledPluginRecord {
 
 export interface MihonDB extends DBSchema {
   libraryPreferences: { key: string; value: LibraryArrangement & { key: string } };
-  syncRecords: { key: string; value: SyncRecord };
+  syncRecords: { key: string; value: SyncRecord; indexes: { 'by-pending': 0 | 1 } };
   syncControl: { key: string; value: MetadataRecord };
   syncProfiles: { key: string; value: StoredProfile };
   categories: { key: string; value: CategoryRecord };
@@ -184,7 +184,7 @@ let databasePromise: Promise<IDBPDatabase<MihonDB>> | undefined;
 
 export async function getRawDB(): Promise<IDBPDatabase<MihonDB>> {
   if (!databasePromise) {
-    databasePromise = openDB<MihonDB>('mihon-pwa', 7, {
+    databasePromise = openDB<MihonDB>('mihon-pwa', 8, {
       upgrade(db, oldVersion, _nextVersion, tx) {
         if (oldVersion < 1) {
           db.createObjectStore('manga', { keyPath: 'key' });
@@ -230,6 +230,10 @@ export async function getRawDB(): Promise<IDBPDatabase<MihonDB>> {
           unwrap(preferences).put({ key: 'arrangement', ...libraryArrangement() });
         }
         if (oldVersion < 7) tx.objectStore('history').createIndex('by-updated', ['updatedAt', 'key']);
+        // v8: pending lookups scan only the journal's pending subset
+        // (phone-heat fix, 2026-11-11: full-store scans per cycle were
+        // walking 100k+ payloads several times a minute while reading).
+        if (oldVersion < 8) tx.objectStore('syncRecords').createIndex('by-pending', 'pending');
       },
       blocked() { dispatchDataEvent('mihon:database-blocked'); },
       blocking(_current, _next, event) {

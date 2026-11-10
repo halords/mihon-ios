@@ -17,7 +17,14 @@ export function getAccountState(): AccountState { return state; }
 export function useAccount(): AccountState { return useSyncExternalStore(listener => { listeners.add(listener); return () => listeners.delete(listener); }, getAccountState); }
 let initialized: Promise<void> | undefined;
 let running: Promise<void> | undefined;
-let timer: ReturnType<typeof setTimeout> | undefined;
+// Set by the 'mihon:sync-dirty' listener whenever local code journals a
+// change; cleared when a cycle finishes a push+pull with nothing pending.
+// Sync model (user direction, 2026-11-11): states save locally as they
+// happen and sync in ONE batch when the app opens — plus a best-effort
+// flush when the app is backgrounded or connectivity returns. There is
+// no mid-session engine: no timer, no dirty-triggered cycle, so reading
+// costs zero scans and zero network until the next open.
+let syncDirty = false;
 let sessionVerified = false;
 let generation = 0;
 let channel: BroadcastChannel | undefined;
@@ -165,7 +172,7 @@ export async function acknowledgeChanges(sent: SyncRecord[], userId: string): Pr
   const current = new Map(sent.map((record, i) => [record.id, rows[i] as SyncRecord | undefined]));
   for (const record of sent) {
     const existing = current.get(record.id);
-    if (existing?.clock === record.clock && existing.deviceId === record.deviceId) store.put({ ...existing, pending: false });
+    if (existing?.clock === record.clock && existing.deviceId === record.deviceId) store.put({ ...existing, pending: 0 });
   }
   await tx.done;
 }
@@ -231,7 +238,7 @@ export async function applyRemoteChanges(changes: RemoteChange[], cursor: number
       }
       nativeStore(change.store).put(value);
     }
-    nativeStore('syncRecords').put({ ...change, pending: false });
+    nativeStore('syncRecords').put({ ...change, pending: 0 });
   }
   nativeStore('syncControl').put({ key: 'clock', value: clock });
   nativeStore('syncControl').put({ key: 'cursor', value: cursor });
@@ -246,8 +253,13 @@ export async function applyRemoteChanges(changes: RemoteChange[], cursor: number
 // change payloads, and the callers below need only the pending subset
 // (or a count of it). Cursor order is primary-key order — identical to
 // getAll() — so collected records keep their previous sequence.
+// Pending lookup via the 'by-pending' index (db v8). The old implementation
+// cursor-scanned the WHOLE syncRecords store — 100k+ records with full
+// payloads — on every cycle and every summary, several times a minute while
+// reading (progress saves keep dirtying the journal). Index range scans touch
+// only the handful of records actually awaiting upload.
 async function scanSyncRecords(db: Awaited<ReturnType<typeof getRawDB>>, visit: (record: SyncRecord) => void): Promise<void> {
-  let cursor = await db.transaction('syncRecords').objectStore('syncRecords').openCursor();
+  let cursor = await db.transaction('syncRecords').objectStore('syncRecords').index('by-pending').openCursor(IDBKeyRange.only(1));
   while (cursor) { visit(cursor.value); cursor = await cursor.continue(); }
 }
 
@@ -259,10 +271,6 @@ async function summary(): Promise<void> {
     db.get('syncControl', 'lastSync'), guestProfileCount(db),
   ]);
   publish({ pending, lastSync: Number(last?.value ?? 0), deviceLibrary: guestCount });
-}
-function schedule(): void {
-  if (timer || !state.user) return;
-  timer = setTimeout(() => { timer = undefined; void syncAccount(); }, 1000);
 }
 export function syncAccount(): Promise<void> {
   if (running) return running;
@@ -315,7 +323,7 @@ async function cycle(): Promise<void> {
     }
     await db.put('syncControl', { key: 'lastSync', value: Date.now() });
     await summary(); publish({ status: 'ready' });
-    if (state.pending) schedule();
+    if (!state.pending) syncDirty = false;
   } catch (error) {
     if (generation !== currentGeneration) return;
     await summary();
@@ -419,11 +427,13 @@ export function initAccount(): Promise<void> {
       channel = new BroadcastChannel('mihon-account');
       channel.onmessage = () => { if (typeof location.reload === 'function') location.reload(); };
     }
-    window.addEventListener('mihon:sync-dirty', schedule);
+    window.addEventListener('mihon:sync-dirty', () => { syncDirty = true; });
     window.addEventListener('online', () => { void (sessionVerified ? syncAccount() : refreshSession()); });
     window.addEventListener('offline', () => { void summary().then(() => publish({ status: state.user ? 'offline' : 'signed-out' })); });
-    document.addEventListener('visibilitychange', () => { if (!document.hidden) void (sessionVerified ? syncAccount() : refreshSession()); });
-    setInterval(() => { if (state.user && navigator.onLine) void (sessionVerified ? syncAccount() : refreshSession()); }, 10000);
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden) void (sessionVerified ? syncAccount() : refreshSession());
+      else if (sessionVerified && syncDirty) void syncAccount();
+    });
     await refreshSession();
   })();
   return initialized;

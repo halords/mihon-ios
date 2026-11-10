@@ -34,7 +34,7 @@ export async function trackSyncWrites(db: IDBPDatabase<MihonDB>): Promise<IDBPDa
     const journalNative = ({ name, key, data }: typeof pendingNative[number]) => {
       clock = Math.max(Date.now(), clock + 1);
       unwrap(tx.objectStore('syncControl')).put({ key: 'clock', value: clock });
-      unwrap(tx.objectStore('syncRecords')).put({ id: syncId(name, key), store: name, key, clock, deviceId: deviceId(), deleted: false, data, pending: true });
+      unwrap(tx.objectStore('syncRecords')).put({ id: syncId(name, key), store: name, key, clock, deviceId: deviceId(), deleted: false, data, pending: 1 });
       dirty = true;
     };
     const ready = Promise.all([tx.objectStore('syncControl').get('owner'), tx.objectStore('syncControl').get('clock')]).then(([owner, previous]) => {
@@ -58,7 +58,7 @@ export async function trackSyncWrites(db: IDBPDatabase<MihonDB>): Promise<IDBPDa
         clock = Math.max(Date.now(), clock + 1, Number(previous?.value ?? 0) + 1);
         const stamp = clock;
         await control.put({ key: 'clock', value: stamp });
-        await tx.objectStore('syncRecords').put({ id: syncId(name, key), store: name as SyncStore, key, clock: stamp, deviceId: deviceId(), deleted: data === null, data, pending: true });
+        await tx.objectStore('syncRecords').put({ id: syncId(name, key), store: name as SyncStore, key, clock: stamp, deviceId: deviceId(), deleted: data === null, data, pending: 1 });
         dirty = true;
       };
       const wrapped = new Proxy(raw, { get(target, property) {

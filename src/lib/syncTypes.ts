@@ -4,7 +4,7 @@ export interface SyncChange {
   id: string; store: SyncStore; key: string; clock: number; deviceId: string;
   deleted: boolean; data: Record<string, unknown> | null;
 }
-export interface SyncRecord extends SyncChange { pending: boolean }
+export interface SyncRecord extends SyncChange { pending: 0 | 1 }
 export interface RemoteChange extends SyncChange { revision: number }
 export interface AccountUser { id: string; email: string }
 

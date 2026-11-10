@@ -33,12 +33,12 @@ it('keeps writes made during upload pending and applies newer remote states with
   await patchChapterState(chapter, key, { read: true, downloaded: true });
   const db = await getDB(); const sent = (await db.get('syncRecords', syncId('chapterState', chapter)))!;
   await patchChapterState(chapter, key, { read: false, lastPage: 0 });
-  await acknowledgeChanges([sent], 'user-a'); expect((await db.get('syncRecords', sent.id))?.pending).toBe(true);
+  await acknowledgeChanges([sent], 'user-a'); expect((await db.get('syncRecords', sent.id))?.pending).toBe(1);
   const current = (await db.get('syncRecords', sent.id))!;
   const remote: RemoteChange = { ...current, clock: current.clock + 1, deviceId: 'other-device', revision: 20, data: { ...current.data, read: false, lastPage: 9, pageOffset: 0.35 } };
   await applyRemoteChanges([remote], 20, 'user-a');
   expect(await getChapterState(chapter)).toMatchObject({ read: false, lastPage: 9, pageOffset: 0.35, downloaded: true });
-  expect((await db.get('syncRecords', sent.id))?.pending).toBe(false);
+  expect((await db.get('syncRecords', sent.id))?.pending).toBe(0);
 });
 it('restores cloud arrangement without syncing device settings and retains arrangement in account profiles', async () => {
   await activateAccountProfile('user-a');
@@ -50,7 +50,7 @@ it('restores cloud arrangement without syncing device settings and retains arran
   await applyRemoteChanges([{ ...local, clock: local.clock + 1, deviceId: 'other', revision: 1, data }], 1, 'user-a');
   expect(libraryArrangement(loadSettings())).toMatchObject({ librarySort: 'title', librarySortDirection: 'ascending', libraryView: 'list', libraryRandomSeed: 27 });
   expect(loadSettings()).toMatchObject({ theme: 'light', suwayomiUrl: 'https://device.example' });
-  expect((await raw.get('syncRecords', local.id))!.pending).toBe(false);
+  expect((await raw.get('syncRecords', local.id))!.pending).toBe(0);
   await activateAccountProfile('user-b'); expect(loadSettings().librarySort).toBe('read');
   await activateAccountProfile('user-a'); expect(loadSettings().librarySort).toBe('title');
 });

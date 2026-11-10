@@ -71,7 +71,7 @@ it('acknowledges a large batch in one call and keeps mid-flight edits pending', 
   const sent: SyncRecord[] = Array.from({ length: 1500 }, (_, i) => {
     const key = 'mangadex::hero::ch-' + i;
     return { id: syncId('chapterState', key), store: 'chapterState', key, clock: 500, deviceId: 'device-a', deleted: false,
-      data: { key, mangaKey: 'mangadex::hero', read: true, lastPage: 1, lastReadAt: 1, pageOffset: 0 }, pending: true };
+      data: { key, mangaKey: 'mangadex::hero', read: true, lastPage: 1, lastReadAt: 1, pageOffset: 0 }, pending: 1 };
   });
   const tx = db.transaction('syncRecords', 'readwrite'); const store = tx.objectStore('syncRecords');
   for (const record of sent) void store.put(record);
@@ -90,9 +90,9 @@ it('acknowledges a small batch against a large unrelated backlog without reading
   const unrelated: SyncRecord[] = Array.from({ length: 5000 }, (_, i) => {
     const key = 'mangadex::other::ch-' + i;
     return { id: syncId('chapterMeta', key), store: 'chapterMeta', key, clock: 700, deviceId: 'device-a', deleted: false,
-      data: { key, mangaKey: 'mangadex::other', chapter: { id: 'ch-' + i, name: 'Chapter ' + i, number: i } }, pending: true };
+      data: { key, mangaKey: 'mangadex::other', chapter: { id: 'ch-' + i, name: 'Chapter ' + i, number: i } }, pending: 1 };
   });
-  const batch: SyncRecord[] = [0, 1, 2].map(i => ({ ...chapterState(20000 + i, 800), pending: true }));
+  const batch: SyncRecord[] = [0, 1, 2].map(i => ({ ...chapterState(20000 + i, 800), pending: 1 }));
   const tx = db.transaction('syncRecords', 'readwrite'); const store = tx.objectStore('syncRecords');
   for (const record of [...unrelated, ...batch]) void store.put(record);
   await tx.done;
@@ -107,7 +107,7 @@ it('acknowledges a small batch against a large unrelated backlog without reading
   expect(all).toHaveLength(5003);
   expect(all.filter(record => !record.pending).map(record => record.id).sort()).toEqual([batch[0]!.id, batch[2]!.id].sort());
   expect(all.filter(record => record.pending)).toHaveLength(5001);
-  expect(all.find(record => record.id === edited.id)).toMatchObject({ pending: true, clock: edited.clock + 1 });
+  expect(all.find(record => record.id === edited.id)).toMatchObject({ pending: 1, clock: edited.clock + 1 });
 }, 60000);
 
 it('applies a 2,000-change pull page with downloads preserved and removals marked', async () => {

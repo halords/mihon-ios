@@ -14,7 +14,7 @@ it('migration with keepOriginal=false replaces the library entry and journals a 
   expect((await getLibrary()).map(entry => entry.key)).toEqual(['other-source::/hero']);
   const tombstone = await (await getRawDB()).get('syncRecords', syncId('library', 'test-source::/hero'));
   expect(tombstone?.deleted).toBe(true);
-  expect(tombstone?.pending).toBe(true);
+  expect(tombstone?.pending).toBe(1);
 });
 
 it('migration with keepOriginal=true keeps both library entries', async () => {

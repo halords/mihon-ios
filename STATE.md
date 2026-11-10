@@ -1,6 +1,15 @@
 # Mihon iOS PWA — implementation state
 
-Updated 2026-11-10. Turso accounts and automatic library/history sync are implemented and deployed at `https://mihon-ios.vercel.app`. Chapter range selection, floating reading-state actions and compact migration branding remain included. Web adapters, sorting, Android extension management and current-state `.tachibk` export remain implemented. The user previously authorized committing and pushing verified changes to GitHub.
+Updated 2026-11-11. Turso accounts and automatic library/history sync are implemented and deployed at `https://mihon-ios.vercel.app`. Chapter range selection, floating reading-state actions and compact migration branding remain included. Web adapters, sorting, Android extension management and current-state `.tachibk` export remain implemented. The user previously authorized committing and pushing verified changes to GitHub.
+
+## Phone-heat fix — idle sync churn (2026-11-11)
+
+User report: phone heats even during normal reading; he suspected persistent syncing — confirmed in code.
+- Audit: account.ts ran a full sync cycle every 10 s (setInterval) for any signed-in user, and every cycle + summary cursor-scanned the ENTIRE syncRecords store (141k records incl. chapterMeta payloads) just to find the pending subset. Reading progress saves journal chapterState writes at every page/flush, each dispatching 'mihon:sync-dirty' -> cycle 1 s later, so reading kept the engine near-continuously scanning + cycling -> sustained CPU/radio -> heat and battery drain.
+- Fix: db v8 adds a 'by-pending' index on syncRecords; SyncRecord.pending is now numeric 0|1 (was boolean — booleans are not valid IDB keys, so the old value could never be indexed). scanSyncRecords() range-scans IDBKeyRange.only(1) — pending lookup is now O(pending). Journal writes (syncStorage) + ack paths write 1/0; profile snapshots store records opaquely, format-compatible.
+- Cadence (revised same day, user direction): sync is OPEN-TIME ONLY. States keep saving locally as they happen (journal writes are unchanged), and the accumulated batch syncs in one cycle when the app opens (initAccount -> refreshSession -> connect -> syncAccount, unchanged). Removed: the 10 s interval entirely, schedule()'s dirty-triggered cycle, and the dirty flag's role as a trigger — 'mihon:sync-dirty' now only marks an in-memory syncDirty flag. Remaining mid-session triggers are lifecycle edges, not an engine: returning to the foreground runs the open-time batch, backgrounding/hiding best-effort flushes when dirty, and 'online' flushes when connectivity returns. No timers anywhere in the sync path; nothing external calls syncAccount mid-session (manual sync actions call the account API directly and are unaffected).
+- Other background work checked: download queue is event-driven (no idle polling; its 250 ms wait runs only while jobs are due), ReaderPage heartbeat is a 15 s light progress save, BrowserSourcesPanel 3 s poll exists only while its verification snapshot is open in Settings. No other hot loops.
+- Tests: 127/128 (only failure = pre-existing browserBackend.test.ts, needs the live VPS browser service; fails identically on pristine tree). New tests/syncPendingIndex.test.ts guards the v8 index + range scan. Build clean.
 
 ## Follow-up batch: downloads, refresh feedback, snapshot chunking (2026-11-10 late evening)
 
