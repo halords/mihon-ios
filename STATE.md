@@ -2,6 +2,13 @@
 
 Updated 2026-11-11. Turso accounts and automatic library/history sync are implemented and deployed at `https://mihon-ios.vercel.app`. Chapter range selection, floating reading-state actions and compact migration branding remain included. Web adapters, sorting, Android extension management and current-state `.tachibk` export remain implemented. The user previously authorized committing and pushing verified changes to GitHub.
 
+## Import-then-login adoption fix (2026-11-11)
+
+User report: importing a library as a guest and THEN logging in appeared to wipe the import — only login-first-then-import worked.
+- Root cause: signInAccount ran addDeviceLibrary() only when the server reported hasSyncedData === false (brand-new accounts). connect() swaps the live stores to the account profile, so for an established account the guest import stayed stranded in its profile snapshot, reachable only via the manual "Add your existing device library" button on the Account page. createAccount already adopted unconditionally; recoverAccount never adopted.
+- Fix (src/lib/account.ts): sign-in and recover now pull the account's cloud state first, then ALWAYS addDeviceLibrary() (no-ops without a snapshot; merges via the backup-import path; consumes the snapshot), then sync again so the merged library uploads in the same session. Manual button remains as a fallback (e.g. session-restore path).
+- Regression test tests/signInAdoption.test.ts: seeds a guest library + progress, signs in with hasSyncedData=true against a mocked account server, asserts the title is live under the account, journaled and acked, snapshot consumed. Verified it fails on the pre-fix code and passes after.
+
 ## Phone-heat fix — idle sync churn (2026-11-11)
 
 User report: phone heats even during normal reading; he suspected persistent syncing — confirmed in code.

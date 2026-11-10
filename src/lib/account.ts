@@ -381,7 +381,17 @@ async function connect(user: AccountUser): Promise<void> {
 export async function signInAccount(email: string, password: string): Promise<void> {
   const result = await request('login', { email, password });
   await connect(result.user); publish({ recoveryCode: '' });
-  if (result.hasSyncedData === false) await addDeviceLibrary();
+  // Pull the account's cloud state BEFORE merging the device library, so
+  // the import merges against current data instead of an empty profile.
+  if (result.hasSyncedData) await syncAccount();
+  // Always adopt the pre-sign-in device library (bug fix, 2026-11-11):
+  // connect() swaps the live stores to the account profile, and adoption
+  // used to run only for accounts with no synced data — so importing a
+  // backup as a guest and THEN signing in to an established account left
+  // the imported library stranded in its snapshot, visible again only
+  // behind the manual "Add device library" button, which read as the
+  // import being wiped. addDeviceLibrary no-ops when no snapshot exists.
+  await addDeviceLibrary();
   await syncAccount();
 }
 export async function createAccount(email: string, password: string): Promise<void> {
@@ -391,7 +401,12 @@ export async function createAccount(email: string, password: string): Promise<vo
 }
 export async function recoverAccount(email: string, recoveryCode: string, password: string): Promise<void> {
   const result = await request('recover', { email, recoveryCode, password });
-  await connect(result.user); publish({ recoveryCode: result.recoveryCode }); await syncAccount();
+  await connect(result.user); publish({ recoveryCode: result.recoveryCode });
+  // Same adoption rule as sign-in: pull first, then merge any device
+  // library that was in use before recovering the account.
+  await syncAccount();
+  await addDeviceLibrary();
+  await syncAccount();
 }
 export async function signOutAccount(): Promise<void> {
   if (!navigator.onLine) throw new Error('Connect to the internet to sign out securely.');
