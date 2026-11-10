@@ -53,7 +53,7 @@ interface Source {
   searchManga(query: string, page: number): Promise<SManga[]>;
   getMangaDetails(id: string): Promise<SManga>;
   getChapterList(mangaId: string): Promise<SChapter[]>;
-  getPageList(chapterId: string): Promise<MangaPage[]>; // { imageUrl }
+  getPageList(chapterId: string, mangaId?: string, signal?: AbortSignal): Promise<MangaPage[]>; // { imageUrl }
 }
 ```
 
@@ -61,6 +61,10 @@ interface Source {
 must be the real chapter number (migration and progress matching depend on
 it). Mark chapters the source hosts elsewhere with `external: true` — the
 app lists them but never tries to fetch their pages.
+
+The exported object may be a class instance. Its prototype methods and
+`this` state are preserved. Pass the optional `signal` to host fetch calls
+inside `getPageList()` so pausing a download cancels source resolution too.
 
 ## Host API (`globalThis.MihonHost`, apiVersion 1)
 
@@ -80,11 +84,11 @@ The module runs in the browser, so the browser's CORS rules apply in full:
 
 - If the target host serves `Access-Control-Allow-Origin` for the app's
   origin (or `*`), direct `fetch` works.
-- If it does not, API calls must go through the app's same-origin proxy
-  (`/api/proxy?url=…`), and that proxy is **allowlist-only**
-  (`api/proxy.ts`): the target host must be added to `ALLOWED_HOSTS` /
-  `ALLOWED_SUFFIXES` there — a one-line change plus a redeploy of the app.
-  There is no way for a module to bypass this from inside the browser.
+- If it does not, use a custom CORS proxy in Settings. Query templates such
+  as `https://proxy.example/?url={url}` are supported. The included
+  `/api/proxy?url=…` only accepts official MangaDex HTTPS hosts, as defined
+  in `server/proxy.ts`; it is not an unrestricted web proxy. Android
+  extension requests use the separate, pinned Suwayomi connection.
 - Page/cover **images** are displayed via `<img>`, which does not need
   CORS; but chapter **downloads** fetch image bytes, so downloads need
   CORS or the proxy route too.

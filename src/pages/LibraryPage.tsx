@@ -1,394 +1,137 @@
-import { useEffect, useRef, useState } from "react";
-import {
-  MangaGrid,
-  MangaList,
-  type MangaListItem,
-} from "../components/MangaViews";
-import {
-  getChapterMetas,
-  getChapterStates,
-  getLibrary,
-  getManga,
-  patchChapterState,
-  putChapterMetas,
-  removeFromLibrary,
-  setLibraryCategory,
-} from "../lib/db";
-import { useNav } from "../lib/nav";
-import {
-  loadSettings,
-  onSettingsChange,
-  saveSettings,
-} from "../lib/settings";
-import { useLoad } from "../lib/useLoad";
-import { CATEGORIES } from "../sources/Source";
-import { getSource } from "../sources";
+import { useState } from 'react';
+import { MangaGrid, MangaList, type MangaListItem } from '../components/MangaViews';
+import Icon from '../components/Icon';
+import Sheet from '../components/Sheet';
+import Cover from '../components/Cover';
+import { EmptyState, toast } from '../components/Feedback';
+import { getCategories, getDB, libraryCategories, patchChapterState, removeFromLibrary, setLibraryCategory } from '../lib/db';
+import { useNav } from '../lib/nav';
+import { saveSettings } from '../lib/settings';
+import { useDataEvents, useSettings } from '../lib/hooks';
+import { useLoad } from '../lib/useLoad';
+import { getSource } from '../sources';
+import { enqueueChapters } from '../lib/downloadQueue';
 
 async function loadLibrary() {
-  const entries = await getLibrary();
-  const items = await Promise.all(
-    entries.map(async (entry) => {
-      const stored = await getManga(entry.key);
-      if (!stored) return null;
-
-      const source = getSource(stored.manga.sourceId);
-      let metas = await getChapterMetas(entry.key);
-
-      if (metas.length === 0 && source && stored.sourceAvailable) {
-        const chapters = await source.getChapterList(stored.manga.id);
-        await putChapterMetas(source.id, stored.manga.id, chapters);
-        metas = await getChapterMetas(entry.key);
-      }
-
-      const states = await getChapterStates(entry.key);
-      const readKeys = new Set(
-        states.filter((state) => state.read).map((state) => state.key),
-      );
-      const unread = metas.filter(
-        (meta) => !meta.chapter.external && !readKeys.has(meta.key),
-      ).length;
-
-      return { entry, stored, unread };
-    }),
-  );
-
-  return items.filter(
-    (item): item is NonNullable<typeof item> => item !== null,
-  );
+  const db = await getDB();
+  const tx = db.transaction(['library', 'manga', 'chapterMeta', 'chapterState', 'history', 'downloads'], 'readonly');
+  const [entries, mangas, metas, states, history, downloads] = await Promise.all([
+    tx.objectStore('library').getAll(), tx.objectStore('manga').getAll(), tx.objectStore('chapterMeta').getAll(),
+    tx.objectStore('chapterState').getAll(), tx.objectStore('history').getAll(), tx.objectStore('downloads').getAll(),
+  ]);
+  await tx.done;
+  const stored = new Map(mangas.map(m => [m.key, m]));
+  const state = new Map(states.map(s => [s.key, s]));
+  const downloaded = new Set(downloads.map(d => d.key));
+  const grouped = new Map<string, typeof metas>();
+  for (const meta of metas) { const list = grouped.get(meta.mangaKey) ?? []; list.push(meta); grouped.set(meta.mangaKey, list); }
+  const lastRead = new Map<string, number>();
+  for (const h of history) lastRead.set(h.mangaKey, Math.max(lastRead.get(h.mangaKey) ?? 0, h.updatedAt));
+  const items = entries.flatMap(entry => {
+    const manga = stored.get(entry.key);
+    if (!manga) return [];
+    const chapters = (grouped.get(entry.key) ?? []).filter(c => !c.chapter.external);
+    return [{ entry, stored: manga, chapters,
+      unread: chapters.filter(c => !state.get(c.key)?.read).length,
+      downloaded: chapters.filter(c => downloaded.has(c.key)).length,
+      bookmarked: chapters.some(c => state.get(c.key)?.bookmark), lastRead: lastRead.get(entry.key) ?? 0 }];
+  });
+  const resume = [...history].sort((a, b) => b.updatedAt - a.updatedAt).find(h => {
+    const manga = stored.get(h.mangaKey);
+    return items.some(i => i.entry.key === h.mangaKey) && !state.get(h.key)?.read &&
+      metas.some(m => m.key === h.key) && !!manga && (downloaded.has(h.key) || !!getSource(manga.manga.sourceId));
+  });
+  return { items, state, downloaded, resume, categories: await getCategories() };
 }
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
+type Filter = 'all' | 'unread' | 'started' | 'completed' | 'bookmarked' | 'missing';
 
 export default function LibraryPage() {
-  const { openManga } = useNav();
+  const nav = useNav();
+  const settings = useSettings();
   const { data, loading, error, reload } = useLoad(loadLibrary, []);
-  const [view, setView] = useState(() => loadSettings().libraryView);
-  const [category, setCategory] = useState<string>("All");
-  const [menuKey, setMenuKey] = useState<string | null>(null);
-  const [menuBusy, setMenuBusy] = useState(false);
-  const [menuError, setMenuError] = useState<string | null>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
-  const actionInProgress = useRef(false);
-
-  useEffect(() => {
-    const syncSettings = () => setView(loadSettings().libraryView);
-    const unsubscribe = onSettingsChange(syncSettings);
-    syncSettings();
-    return unsubscribe;
-  }, []);
-
-  const libraryItems = data ?? [];
-  // Built-in categories plus any extra category names present in the
-  // library (e.g. categories created by a Mihon backup import).
-  const extraCategories = [
-    ...new Set(libraryItems.map((item) => item.entry.category)),
-  ].filter((c) => !(CATEGORIES as readonly string[]).includes(c));
-  const tabCategories: string[] = ["All", ...CATEGORIES, ...extraCategories];
-  const visibleItems = libraryItems
-    .filter((item) => category === "All" || item.entry.category === category)
-    .sort((a, b) => a.stored.manga.title.localeCompare(b.stored.manga.title));
-
-  const mangaItems: MangaListItem[] = visibleItems.map(
-    ({ entry, stored, unread }) => ({
-      key: entry.key,
-      manga: stored.manga,
-      unread,
-      sourceMissing:
-        !stored.sourceAvailable || !getSource(stored.manga.sourceId),
-    }),
-  );
-
-  const menuItem = libraryItems.find((item) => item.entry.key === menuKey);
-  const menuVisible = menuItem !== undefined;
-
-  useEffect(() => {
-    if (!menuVisible) return;
-
-    const previousFocus = document.activeElement;
-    menuRef.current?.focus();
-
-    return () => {
-      if (previousFocus instanceof HTMLElement && previousFocus.isConnected) {
-        previousFocus.focus();
-      }
-    };
-  }, [menuKey, menuVisible]);
-
-  function toggleView() {
-    const next = view === "grid" ? "list" : "grid";
-    saveSettings({ libraryView: next });
-    setView(loadSettings().libraryView);
+  useDataEvents(reload);
+  const [category, setCategory] = useState('All');
+  const [query, setQuery] = useState('');
+  const [showSearch, setShowSearch] = useState(false);
+  const [filter, setFilter] = useState<Filter>('all');
+  const [sheet, setSheet] = useState<'filters' | 'categories' | 'more' | null>(null);
+  const [selecting, setSelecting] = useState(false);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [categorySelection, setCategorySelection] = useState<string[]>([]);
+  const [busy, setBusy] = useState(false);
+  const all = data?.items ?? [];
+  const visible = all.filter(item => {
+    if (category !== 'All' && !libraryCategories(item.entry).includes(category)) return false;
+    if (settings.downloadedOnly && !item.downloaded) return false;
+    if (query && ![item.stored.manga.title, item.stored.manga.author, item.stored.manga.sourceName, ...item.stored.manga.genres].join(' ').toLowerCase().includes(query.toLowerCase())) return false;
+    if (filter === 'unread' && !item.unread || filter === 'started' && !item.lastRead ||
+      filter === 'completed' && (item.unread > 0 || !item.chapters.length) || filter === 'bookmarked' && !item.bookmarked ||
+      filter === 'missing' && getSource(item.stored.manga.sourceId)) return false;
+    return true;
+  }).sort((a, b) => {
+    const value = settings.librarySort === 'added' ? b.entry.addedAt - a.entry.addedAt : settings.librarySort === 'read' ? b.lastRead - a.lastRead :
+      settings.librarySort === 'unread' ? b.unread - a.unread : a.stored.manga.title.localeCompare(b.stored.manga.title, undefined, { numeric: true });
+    return settings.sortDescending ? -value : value;
+  });
+  const cards: MangaListItem[] = visible.map(item => ({ key: item.entry.key, manga: item.stored.manga, unread: item.unread, downloaded: item.downloaded,
+    sourceMissing: !['local', '0'].includes(item.stored.manga.sourceId) && !getSource(item.stored.manga.sourceId), selected: selecting ? selected.has(item.entry.key) : undefined }));
+  function toggle(key: string): void { setSelecting(true); setSelected(old => { const next = new Set(old); if (next.has(key)) next.delete(key); else next.add(key); return next; }); }
+  function clearSelection(): void { setSelecting(false); setSelected(new Set()); }
+  async function run(action: () => Promise<void>): Promise<void> {
+    setBusy(true);
+    try { await action(); clearSelection(); setSheet(null); reload(); }
+    catch (error) { toast(error instanceof Error ? error.message : 'Unable to update library'); }
+    finally { setBusy(false); }
   }
-
-  function openMenu(key: string) {
-    if (actionInProgress.current) return;
-    setMenuError(null);
-    setMenuKey(key);
+  function openCategories(): void {
+    const first = all.find(i => selected.has(i.entry.key));
+    setCategorySelection(first ? libraryCategories(first.entry) : ['Default']);
+    setSheet('categories');
   }
-
-  function closeMenu() {
-    if (actionInProgress.current) return;
-    setMenuKey(null);
-    setMenuError(null);
-  }
-
-  async function runMenuAction(action: () => Promise<unknown>) {
-    if (actionInProgress.current) return;
-
-    actionInProgress.current = true;
-    setMenuBusy(true);
-    setMenuError(null);
-
-    try {
-      await action();
-      await reload();
-      setMenuKey(null);
-    } catch (cause: unknown) {
-      setMenuError(errorMessage(cause));
-    } finally {
-      actionInProgress.current = false;
-      setMenuBusy(false);
-    }
-  }
-
-  return (
-    <div className="screen">
-      <header
-        className="topbar"
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-        }}
-      >
-        <h1>Library</h1>
-        <button
-          type="button"
-          className="btn btn-ghost"
-          onClick={toggleView}
-          aria-label={`Switch to ${view === "grid" ? "list" : "grid"} view`}
-          title={`Switch to ${view === "grid" ? "list" : "grid"} view`}
-        >
-          {view === "grid" ? "☰" : "▦"}
-        </button>
-      </header>
-
-      <div
-        role="group"
-        aria-label="Library category"
-        style={{
-          display: "flex",
-          gap: 8,
-          overflowX: "auto",
-          padding: "8px 0 16px",
-        }}
-      >
-        {tabCategories.map((cat) => (
-          <button
-            key={cat}
-            type="button"
-            className="chip"
-            aria-pressed={category === cat}
-            onClick={() => setCategory(cat)}
-            style={{
-              flexShrink: 0,
-              whiteSpace: "nowrap",
-              ...(category === cat
-                ? {
-                    background: "var(--accent, #6366f1)",
-                    borderColor: "var(--accent, #6366f1)",
-                    color: "var(--bg, #fff)",
-                  }
-                : {}),
-            }}
-          >
-            {cat}
-          </button>
-        ))}
-      </div>
-
-      {loading ? (
-        <div role="status" aria-label="Loading library">
-          <div className="spinner" aria-hidden="true" />
-        </div>
-      ) : error ? (
-        <div className="error" role="alert">
-          <p>{errorMessage(error)}</p>
-          <button
-            type="button"
-            className="btn"
-            onClick={() => {
-              void reload();
-            }}
-          >
-            Retry
-          </button>
-        </div>
-      ) : libraryItems.length === 0 ? (
-        <div className="empty">
-          Your library is empty. Find manga in Browse.
-        </div>
-      ) : mangaItems.length === 0 ? (
-        <div className="empty">Nothing in this category.</div>
-      ) : view === "grid" ? (
-        <MangaGrid
-          items={mangaItems}
-          onOpen={openManga}
-          onMenu={openMenu}
-        />
-      ) : (
-        <MangaList
-          items={mangaItems}
-          onOpen={openManga}
-          onMenu={openMenu}
-        />
-      )}
-
-      {menuItem && (
-        <div
-          style={{
-            position: "fixed",
-            inset: 0,
-            zIndex: 1000,
-            background: "rgba(0, 0, 0, 0.5)",
-            display: "flex",
-            alignItems: "flex-end",
-            justifyContent: "center",
-          }}
-          onClick={(event) => {
-            if (event.target === event.currentTarget) closeMenu();
-          }}
-        >
-          <div
-            ref={menuRef}
-            className="menu-sheet"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="library-menu-title"
-            aria-busy={menuBusy}
-            tabIndex={-1}
-            style={{
-              width: "100%",
-              maxWidth: 480,
-              maxHeight: "85dvh",
-              overflowY: "auto",
-              padding: 16,
-              boxSizing: "border-box",
-            }}
-            onKeyDown={(event) => {
-              if (event.key === "Escape") {
-                event.preventDefault();
-                event.stopPropagation();
-                closeMenu();
-                return;
-              }
-
-              if (event.key !== "Tab") return;
-
-              const buttons = Array.from(
-                event.currentTarget.querySelectorAll<HTMLButtonElement>(
-                  "button:not(:disabled)",
-                ),
-              );
-              const first = buttons[0];
-              const last = buttons[buttons.length - 1];
-
-              if (!first || !last) {
-                event.preventDefault();
-                event.currentTarget.focus();
-                return;
-              }
-
-              const active = document.activeElement;
-              const activeIsButton = buttons.some((button) => button === active);
-
-              if (event.shiftKey && (active === first || !activeIsButton)) {
-                event.preventDefault();
-                last.focus();
-              } else if (!event.shiftKey && (active === last || !activeIsButton)) {
-                event.preventDefault();
-                first.focus();
-              }
-            }}
-          >
-            <h2 id="library-menu-title" style={{ marginTop: 0 }}>
-              {menuItem.stored.manga.title}
-            </h2>
-
-            {menuError && (
-              <p className="error" role="alert">
-                {menuError}
-              </p>
-            )}
-
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              {CATEGORIES.map((cat) => {
-                const current = menuItem.entry.category === cat;
-
-                return (
-                  <button
-                    key={cat}
-                    type="button"
-                    className="btn"
-                    disabled={menuBusy || current}
-                    onClick={() => {
-                      void runMenuAction(() =>
-                        setLibraryCategory(menuItem.entry.key, cat),
-                      );
-                    }}
-                  >
-                    Move to {cat}
-                    {current ? " ✓" : ""}
-                  </button>
-                );
-              })}
-
-              <button
-                type="button"
-                className="btn"
-                disabled={menuBusy}
-                onClick={() => {
-                  void runMenuAction(async () => {
-                    const key = menuItem.entry.key;
-                    const metas = await getChapterMetas(key);
-                    await Promise.all(
-                      metas.map((meta) =>
-                        patchChapterState(meta.key, key, { read: true }),
-                      ),
-                    );
-                  });
-                }}
-              >
-                Mark all read
-              </button>
-
-              <button
-                type="button"
-                className="btn btn-danger"
-                disabled={menuBusy}
-                onClick={() => {
-                  void runMenuAction(() =>
-                    removeFromLibrary(menuItem.entry.key),
-                  );
-                }}
-              >
-                Remove from Library
-              </button>
-
-              <button
-                type="button"
-                className="btn btn-ghost"
-                disabled={menuBusy}
-                onClick={closeMenu}
-              >
-                Cancel
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-  );
+  return <main className="screen library-screen">
+    <header className={`topbar ${selecting ? 'selection-topbar' : ''}`}>
+      {selecting ? <><button className="icon-btn" aria-label="Cancel selection" onClick={clearSelection}><Icon name="close" /></button><h1>{selected.size} selected</h1><button className="icon-btn" aria-label="Select all visible titles" onClick={() => setSelected(new Set(visible.map(i => i.entry.key)))}><Icon name="check" /></button></> :
+        <><h1>Library <span className="title-count">{all.length}</span></h1><button className="icon-btn" aria-label="Search library" aria-pressed={showSearch} onClick={() => setShowSearch(!showSearch)}><Icon name="search" /></button><button className={`icon-btn ${filter !== 'all' || settings.downloadedOnly ? 'accent' : ''}`} aria-label="Filter and sort library" onClick={() => setSheet('filters')}><Icon name="filter" /></button><button className="icon-btn" aria-label="Library options" onClick={() => setSheet('more')}><Icon name="more" /></button></>}
+    </header>
+    {showSearch && <div className="searchbar"><Icon name="search" /><input type="search" autoFocus aria-label="Search your library" placeholder="Title, author, or source" value={query} onChange={e => setQuery(e.target.value)} /></div>}
+    <div className="category-tabs" aria-label="Library categories">{['All', ...new Set((data?.categories ?? []).map(c => c.name))].map(name =>
+      <button key={name} className={`category-tab ${category === name ? 'active' : ''}`} aria-pressed={category === name} onClick={() => setCategory(name)}>{name}<span>{name === 'All' ? all.length : all.filter(i => libraryCategories(i.entry).includes(name)).length}</span></button>)}</div>
+    {settings.downloadedOnly && <div className="inline-note"><Icon name="download" size={16} /> Downloaded titles only<button className="text-btn" onClick={() => saveSettings({ downloadedOnly: false })}>Show all</button></div>}
+    {!selecting && !query && category === 'All' && data?.resume && (!settings.downloadedOnly || data.downloaded.has(data.resume.key)) && <button className="continue-card" onClick={() => nav.openReader(data.resume!.mangaKey, data.resume!.key.slice(data.resume!.mangaKey.length + 2))}>
+      <Cover url={data.resume.coverUrl} title={data.resume.mangaTitle} /><span><small>CONTINUE READING</small><strong>{data.resume.mangaTitle}</strong><span>{data.resume.chapterName} · Page {data.resume.page + 1}</span></span><span className="continue-play"><Icon name="play" size={20} filled /></span>
+    </button>}
+    {loading && !data ? <div className="spinner" role="status" aria-label="Loading library" /> : error ? <div className="error" role="alert">{error}<button className="text-btn" onClick={reload}>Retry</button></div> : !all.length ?
+      <EmptyState title="Your library starts here"><p>Bring your Mihon library with you, or find your next read.</p><button className="btn" onClick={nav.openBackup}><Icon name="backup" size={18} />Import Mihon backup</button><button className="text-btn" onClick={() => nav.setTab('browse')}>Browse sources <Icon name="arrow" size={16} /></button></EmptyState> :
+      !cards.length ? <EmptyState icon="search" title="No titles match"><p>Try another category or adjust your filters.</p><button className="text-btn" onClick={() => { setCategory('All'); setQuery(''); setFilter('all'); saveSettings({ downloadedOnly: false }); }}>Reset filters</button></EmptyState> :
+      settings.libraryView === 'grid' ? <MangaGrid items={cards} onOpen={key => selecting ? toggle(key) : nav.openManga(key)} onMenu={toggle} /> : <MangaList items={cards} onOpen={key => selecting ? toggle(key) : nav.openManga(key)} onMenu={toggle} />}
+    {selecting && <div className="selection-actions" aria-label="Selected title actions">
+      <button className="icon-btn" disabled={!selected.size || busy} aria-label="Set categories" onClick={openCategories}><Icon name="folder" /></button>
+      <button className="icon-btn" disabled={!selected.size || busy} aria-label="Download unread chapters" onClick={() => void run(async () => {
+        let count = 0;
+        for (const item of all.filter(i => selected.has(i.entry.key))) count += await enqueueChapters(item.entry.key, item.chapters.filter(c => !data?.state.get(c.key)?.read).map(c => c.chapter.id));
+        toast(`${count} chapters added to the download queue`);
+      })}><Icon name="download" /></button>
+      <button className="icon-btn" disabled={!selected.size || busy} aria-label="Mark selected titles read" onClick={() => void run(async () => { for (const item of all.filter(i => selected.has(i.entry.key))) for (const c of item.chapters) await patchChapterState(c.key, item.entry.key, { read: true }); toast('Marked as read'); })}><Icon name="check" /></button>
+      <button className="icon-btn" disabled={!selected.size || busy} aria-label="Remove selected titles from library" onClick={() => {
+        if (window.confirm(`Remove ${selected.size} titles from your library? Progress and downloads are kept.`)) void run(async () => { for (const key of selected) await removeFromLibrary(key); });
+      }}><Icon name="trash" /></button>
+    </div>}
+    {sheet === 'filters' && <Sheet title="Library options" onClose={() => setSheet(null)}>
+      <div className="form-row"><span>Downloaded only</span><input type="checkbox" aria-label="Downloaded only" checked={settings.downloadedOnly} onChange={e => saveSettings({ downloadedOnly: e.target.checked })} /></div>
+      <label className="form-row">Reading status<select value={filter} onChange={e => setFilter(e.target.value as Filter)}><option value="all">All titles</option><option value="unread">Has unread chapters</option><option value="started">Started reading</option><option value="completed">All chapters read</option><option value="bookmarked">Has bookmarks</option><option value="missing">Needs a source</option></select></label>
+      <label className="form-row">Sort by<select value={settings.librarySort} onChange={e => saveSettings({ librarySort: e.target.value as typeof settings.librarySort })}><option value="title">Title</option><option value="added">Date added</option><option value="read">Last read</option><option value="unread">Unread count</option></select></label>
+      <label className="form-row">Reverse order<input type="checkbox" checked={settings.sortDescending} onChange={e => saveSettings({ sortDescending: e.target.checked })} /></label>
+      <label className="form-row">Display<select value={settings.libraryView} onChange={e => saveSettings({ libraryView: e.target.value as 'grid' | 'list' })}><option value="grid">Cover grid</option><option value="list">List</option></select></label><button className="btn wide" onClick={() => setSheet(null)}>Done</button>
+    </Sheet>}
+    {sheet === 'more' && <Sheet title="Library" onClose={() => setSheet(null)}>
+      <button className="sheet-option" onClick={() => { setSheet(null); setSelecting(true); }}><Icon name="check" />Select titles</button>
+      <button className="sheet-option" onClick={nav.openCategories}><Icon name="folder" />Manage categories</button>
+      <button className="sheet-option" onClick={nav.openBackup}><Icon name="backup" />Backup & restore</button>
+      <button className="sheet-option" onClick={nav.openDownloads}><Icon name="download" />Download manager</button>
+    </Sheet>}
+    {sheet === 'categories' && <Sheet title="Set categories" onClose={() => setSheet(null)}>
+      {(data?.categories ?? []).map(c => <label key={c.id} className="form-row"><span>{c.name}</span><input type="checkbox" checked={categorySelection.includes(c.name)} onChange={e => setCategorySelection(old => e.target.checked ? [...old, c.name] : old.filter(n => n !== c.name))} /></label>)}
+      <button className="btn wide" disabled={busy} onClick={() => void run(async () => { for (const key of selected) await setLibraryCategory(key, categorySelection); })}>Apply to {selected.size} titles</button>
+    </Sheet>}
+  </main>;
 }

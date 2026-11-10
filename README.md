@@ -1,120 +1,108 @@
-# Mihon PWA
+# Mihon PWA for iOS
 
-A local-first, installable PWA manga reader for iPhone, modelled on
-[Mihon](https://github.com/mihonapp/mihon) (Android). No account, no server:
-your library, categories, reading progress, history, settings and downloaded
-chapters live **only on your device** (IndexedDB + localStorage + Cache
-Storage), and the installed app opens and works fully offline.
+An installable manga reader inspired by [Mihon Android](https://github.com/mihonapp/mihon). Import your Mihon library, retain its reading state, connect its Android sources through Suwayomi, and download chapters onto your iPhone for offline reading.
 
-## Sources
+The app stores its library and reading data on the device. MangaDex is built in; [Suwayomi](https://github.com/Suwayomi/Suwayomi-Server) runs other compatible Android extensions on a computer or server. This project is independent of Mihon.
 
-- **MangaDex** (`src/sources/mangadexSource.ts`) — a real adapter against the
-  official public MangaDex API (`https://api.mangadex.org`). Popular, latest
-  updates, search, details, chapter feed (English), and pages via the
-  at-home server. Content ratings default to safe + suggestive.
-- **Sample source** (`src/sources/sampleSource.ts`) — bundled offline demo
-  content with locally generated SVG pages. Works with no network at all and
-  demonstrates the "new chapter appears on refresh" Updates flow.
+## Start locally
 
-No other sources are bundled. In particular there is **no MangaHub adapter
-and no scraping** of any manga site.
+Use Node **22.18 or newer**; the Docker image uses Node 24.
 
-## Run it
-
-```bash
-npm install
-npm run dev      # local development
-npm run build    # production build (tsc + vite + service worker)
-npm run preview  # serve the production build
+```sh
+npm ci
+npm run dev
 ```
 
-## Install on iPhone
+For the production app and its API proxies:
 
-1. Deploy or serve the production build over HTTPS (e.g. Vercel).
-2. Open the URL in **Safari** on the iPhone.
-3. Tap **Share → Add to Home Screen**.
-4. Launch "Mihon" from the home screen — it runs standalone, full-screen,
-   and offline. The service worker precaches the whole app shell.
-
-Tip: in **More → Settings → Storage**, request persistent storage and check
-the on-device usage readout.
-
-## Features
-
-- **Library** with categories (Default, Reading, Completed, On Hold,
-  Dropped — plus any categories created by a backup import), grid/list
-  toggle, unread badges, per-item menu (move category, mark all read,
-  remove).
-- **Browse** across sources with search; manga details with chapter list,
-  read/download state, Start/Continue.
-- **Reader**: vertical (webtoon) and paged modes, tap zones, preloading,
-  progress bar, resume where you left off, chapter-end prev/next.
-- **Downloads** (headline feature): per-chapter download into Cache Storage
-  with live progress; downloaded chapters are read **100% from cache** —
-  they work end-to-end in airplane mode. Delete per chapter or per manga;
-  "Delete all downloads" lives in Settings.
-- **Updates**: refresh checks your library sources for new chapters.
-- **History**: recently read chapters with one-tap resume.
-- **Settings**: reader defaults, dark/light theme, optional CORS proxy,
-  storage usage + persistence, and backup/restore.
-
-## Backup & device-to-device transfer
-
-There is no account sync — backups are the safety net (More → Settings →
-**Backup & restore**, kept prominent for that reason):
-
-- **Export / import JSON** — this app's own full backup format (library,
-  chapters, read state, history, download metadata).
-- **Import Mihon Android backup (`.tachibk`)** — imports categories,
-  library manga, per-chapter read state + last page read, and reading
-  history from a Mihon/Tachiyomi backup file (gzip-compressed protobuf;
-  parser in `src/backup/`).
-  - Entries from **MangaDex** (matched by Mihon source id
-    `2499283573021220255` or by source name) become fully readable through
-    the built-in adapter.
-  - Entries from any other source import completely as library entries —
-    metadata, categories, chapters and progress — badged **"source not
-    available in PWA yet"**. Their reading content arrives when a web
-    adapter for that source exists.
-  - A manga with several Mihon categories is filed under its first one
-    (the PWA uses one category per entry).
-- Export of `.tachibk` is not supported; JSON is the export format.
-
-## Writing a new source adapter
-
-Implement the `Source` interface in `src/sources/Source.ts`:
-
-```ts
-interface Source {
-  id: string;
-  name: string;
-  getPopularManga(page: number): Promise<SManga[]>;
-  getLatestUpdates(page: number): Promise<SManga[]>;
-  searchManga(query: string, page: number): Promise<SManga[]>;
-  getMangaDetails(id: string): Promise<SManga>;
-  getChapterList(mangaId: string): Promise<SChapter[]>;
-  getPageList(chapterId: string): Promise<MangaPage[]>;
-}
+```sh
+npm run build
+npm start
 ```
 
-Then register the adapter in `src/sources/index.ts`. Use
-`fetchJson` from `src/lib/fetchJson.ts` for HTTP so the user's optional
-proxy setting is honoured. Manga/chapter ids are source-local strings;
-the `mangaKey`/`chapterKey` helpers build the storage keys.
+Open `http://localhost:4173`. `npm start` reads `.env` if present. Copy `.env.example` to `.env` to configure `SUWAYOMI_URL` for the bundled connection. `npm run preview` also includes the proxies.
 
-## CORS and the proxy setting
+For the PWA, Suwayomi, and optional trusted HTTPS setup together, follow [docs/SUWAYOMI.md](docs/SUWAYOMI.md). There is also an offline setup guide at `/help/suwayomi.html`, linked from Connections.
 
-Browser `fetch` is subject to CORS. The MangaDex API allows cross-origin
-GET requests, so it works directly. Sources whose APIs do not send CORS
-headers need a proxy: set **PROXY_BASE** in Settings (e.g.
-`https://your-proxy.example/`) and `fetchJson` will prefix request URLs
-with it (`{proxyBase}/{original url}`). Leave it empty for direct requests.
+## Migrate from Mihon
 
-## Privacy / storage notes
+1. Export a `.tachibk` backup from Mihon and move it to your iPhone’s Files app.
+2. Open **More → Backup & restore → Choose backup**. Review the counts and sources, then restore. Restoration merges with your library and preserves newer local reading progress.
+3. For Android sources, start Suwayomi and install the matching extensions in its WebUI. Open **Connections** in the PWA and connect to that server.
+4. Use **Copy to server** beside the retained Mihon backup. This gives Suwayomi the original source IDs and manga/chapter URLs. If your hosting platform limits uploads, restore the original file in Suwayomi’s WebUI instead.
+5. Open a title and download chapters. Completed chapters can be read with both the network and Suwayomi unavailable.
 
-- Everything is stored on-device; the only network traffic is to source
-  APIs (and your optional proxy).
-- The app requests persistent storage on launch (best effort) and from
-  Settings, so the browser is less likely to evict your library/downloads.
-- Downloaded pages are stored in the `mihon-pages-v1` cache; library data
-  lives in the `mihon-pwa` IndexedDB database.
+The repository’s `app.mihon_2026-11-07_15-00.tachibk` is **an empty placeholder**. The importer was implemented against Mihon’s open source schema and independent synthetic fixtures. A real, nonempty backup is required to migrate your personal library.
+
+### What a Mihon restore retains
+
+| Data | Behavior |
+| --- | --- |
+| Manga and sources | Metadata, exact signed 64-bit source IDs, original URLs, favorite state, added dates, flags, and notes are retained. Unavailable sources still import. |
+| Categories | Names, order, flags, and every membership are retained. A title can belong to several categories. |
+| Chapters | Metadata, read/unread state, last page, bookmarks, scanlators, source order, dates, and memos are retained. |
+| History | Reading dates and duration are retained. The PWA records new progress and history together. |
+| Tracking | Original tracking IDs, scores, status, and progress are retained and viewable. Tracker login and live tracker synchronization are not implemented. |
+| Preferences | Matching reader preferences can be applied. Android preferences, source preferences, and extension repository metadata are retained even when there is no web equivalent. |
+| Original file | The original compressed bytes are retained by SHA-256 and can be downloaded unchanged. This preserves future and Android-specific fields. |
+
+A `.tachibk` does **not** contain downloaded chapter images or the Android extension APKs. Install matching extensions in Suwayomi, then download pages or import existing chapter files.
+
+### Move existing Android downloads
+
+Put each chapter’s numbered image files in its own ZIP/CBZ archive. Under **Backup & restore → Import offline chapters**, select the imported title as the destination and choose its chapter files. Exact chapter names are recommended; ambiguous chapter-number matches are rejected so progress is not attached to the wrong chapter. You can also create local titles from CBZ files without a source connection.
+
+## Reading and library features
+
+- Library search, categories, multiple memberships, grid/list views, sorting, unread and download badges, and batch actions.
+- Webtoon reading with optional continuous chapters, LTR/RTL paged reading, fit controls, zoom, swipe/keyboard navigation, bookmarks, page seeking, and resume offsets.
+- A persistent download queue with progress, pause, resume, cancel, retry, interrupted-download recovery, and a foreground screen wake lock where supported.
+- Download management, CBZ export, storage usage, and persistent-storage requests.
+- Source-specific browsing and pagination, MangaDex language/data-saver settings, Suwayomi connections, and installable web source adapters.
+- Library updates that isolate individual source failures, saved update results, searchable reading history, and source migration that carries reading state.
+- Dark/light themes, mobile safe areas, install icons, an offline app shell, and an explicit app-update prompt.
+
+MangaDex entries from compatible Mihon source IDs or names use the built-in adapter. Other imported source IDs remain exact so a matching Suwayomi extension or web adapter can resolve them. A sample source and web-extension demo are included for trying the reader without external services.
+
+## Install and read offline on iPhone
+
+Serve the production app over **trusted HTTPS**. Open it in Safari, choose **Share → Add to Home Screen**, and launch the installed app. Import and read from that same installed app; Safari tabs and Home Screen installations can have separate storage.
+
+Open the installed app online once so its service worker saves the app shell. Keep it visible while chapters download, and wait for them to appear under **Downloads → Downloaded**. Then turn on airplane mode and open a downloaded chapter. Cached pages load directly from the device without contacting a source or server.
+
+iOS can suspend an app after it enters the background and can evict browser storage under pressure. The queue persists and resumes when you reopen it, but an iOS PWA cannot promise Android-style background downloads or permanent storage. Request persistent storage in Settings and keep your exports.
+
+The reader materializes cached image URLs near the viewport and releases them as they move away to reduce memory use on long chapters. Download manifests are checked against actual cached pages; a restored metadata flag cannot falsely claim that pages are available offline.
+
+## Back up this PWA
+
+Use **Export PWA library (.json)** for metadata, reading state, settings, categories, web extension code, and original Mihon archives. Export downloaded chapter images separately as **CBZ** from Downloads. Restore the JSON, then attach the CBZ files to their existing titles to move both data and pages to another device.
+
+JSON v1 backups remain readable. JSON v2 preserves the additional migration metadata. Included web extension code is only activated when you select that restore option. There is no account synchronization or new `.tachibk` generation; the original `.tachibk` can be exported unchanged.
+
+## Hosting and source networking
+
+- **Node/Docker:** the production server serves `dist/`, proxies official MangaDex hosts, and proxies a pinned `SUWAYOMI_URL` under `/api/suwayomi/`.
+- **Vercel:** `vercel.json` routes nested Suwayomi requests to the included function. Set `SUWAYOMI_URL` in the deployment environment. Function upload/response limits may require direct HTTPS Suwayomi or the Node server for large backups and image pages.
+- **Static hosting:** the app shell works, but source networking needs a separately hosted compatible proxy or a direct HTTPS server with CORS support. MangaDex uses `/api/proxy`, so a static-only host must provide that route.
+
+The bundled proxy is limited to official MangaDex hosts and the configured Suwayomi server. Other web adapters can use a CORS-enabled API or the custom proxy setting, including `https://proxy.example/?url={url}` templates. See [PLUGIN.md](PLUGIN.md) for the web extension contract. Android APKs run in Suwayomi; they cannot execute inside an iOS browser.
+
+## Development checks
+
+```sh
+npm test
+npm run build
+npx playwright install chromium webkit
+npm run test:e2e
+```
+
+Unit tests cover protobuf preservation, transactional restoration, storage, source identity, networking cancellation, queue recovery, chapter file imports, downloads, and updates. Mobile Chromium/WebKit tests cover migration, categories, chapter imports, downloads, offline reloads, reader resume, final-page behavior, and navigation. [The optional live server check](docs/SUWAYOMI.md#live-server-contract-check) verifies backup restoration, original-URL resolution, page fetching, and offline caching against Suwayomi.
+
+Physical iPhone installation, iOS storage eviction, and the unavailable personal backup have not been verified. Full Android feature parity is not claimed; the core library, migration, reading, and offline download workflows are implemented.
+
+## References
+
+- [Mihon schema reference](https://github.com/mihonapp/mihon/tree/524fa53043f2f5b2321ea13027e44f093ab4245c/app/src/main/java/eu/kanade/tachiyomi/data/backup/models)
+- [Suwayomi Server](https://github.com/Suwayomi/Suwayomi-Server), with live API checks against **v2.4.2366**
+- [Suwayomi Docker image](https://github.com/Suwayomi/Suwayomi-Server-docker)

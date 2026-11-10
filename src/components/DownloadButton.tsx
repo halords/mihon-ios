@@ -1,95 +1,31 @@
 import { useState } from 'react';
 import { chapterKey } from '../sources/Source';
-import { downloadChapter, deleteChapterDownload } from '../lib/downloads';
+import { deleteChapterDownload } from '../lib/downloads';
+import { enqueueChapters, removeDownloadJob, retryDownload } from '../lib/downloadQueue';
+import { useQueue } from '../lib/hooks';
+import Icon from './Icon';
+import { toast } from './Feedback';
 
-export default function DownloadButton(props: {
-  mangaKey: string;
-  sourceId: string;
-  mangaId: string;
-  chapterId: string;
-  downloaded: boolean;
-}): React.JSX.Element {
-  const { mangaKey, sourceId, mangaId, chapterId, downloaded } = props;
-  const [busy, setBusy] = useState<boolean>(false);
-  const [progress, setProgress] = useState<{
-    done: number;
-    total: number;
-  } | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  const cKey = chapterKey(sourceId, mangaId, chapterId);
-
-  return (
-    <span onClick={(e) => e.stopPropagation()}>
-      {busy ? (
-        <button
-          type="button"
-          className="btn btn-ghost"
-          disabled
-          style={{ minWidth: 44, minHeight: 44 }}
-        >
-          {progress
-            ? `${Math.round((progress.done / progress.total) * 100)}%`
-            : '…'}
-        </button>
-      ) : downloaded ? (
-        <button
-          type="button"
-          className="btn btn-ghost"
-          aria-label="Delete download"
-          title="Downloaded — tap to delete"
-          style={{ minWidth: 44, minHeight: 44 }}
-          onClick={async () => {
-            if (window.confirm('Delete this downloaded chapter?')) {
-              setBusy(true);
-              try {
-                await deleteChapterDownload(mangaKey, cKey);
-                window.dispatchEvent(new Event('mihon:downloads-changed'));
-              } catch {
-                setError('Failed');
-              } finally {
-                setBusy(false);
-              }
-            }
-          }}
-        >
-          ✓
-        </button>
-      ) : (
-        <button
-          type="button"
-          className="btn btn-ghost"
-          aria-label="Download chapter"
-          style={{ minWidth: 44, minHeight: 44 }}
-          onClick={async () => {
-            setBusy(true);
-            setError(null);
-            try {
-              await downloadChapter(
-                mangaKey,
-                cKey,
-                sourceId,
-                mangaId,
-                chapterId,
-                (done, total) => setProgress({ done, total }),
-              );
-              window.dispatchEvent(new Event('mihon:downloads-changed'));
-            } catch {
-              setError('Failed');
-            } finally {
-              setBusy(false);
-              setProgress(null);
-            }
-          }}
-        >
-          ↓
-        </button>
-      )}
-      {error && (
-        <span className="error" style={{ fontSize: '0.7rem' }}>
-          {error}
-        </span>
-      )}
-    </span>
-  );
+export default function DownloadButton({ mangaKey, sourceId, mangaId, chapterId, downloaded }: {
+  mangaKey: string; sourceId: string; mangaId: string; chapterId: string; downloaded: boolean;
+}) {
+  const queue = useQueue();
+  const job = queue.jobs.find(j => j.key === chapterKey(sourceId, mangaId, chapterId));
+  const [busy, setBusy] = useState(false);
+  async function act(): Promise<void> {
+    if (busy) return;
+    setBusy(true);
+    try {
+      if (downloaded) {
+        if (window.confirm('Delete this chapter’s downloaded pages? Reading progress is kept.')) await deleteChapterDownload(mangaKey, chapterKey(sourceId, mangaId, chapterId));
+      } else if (job?.status === 'failed') await retryDownload(job.key);
+      else if (job) await removeDownloadJob(job.key);
+      else { await enqueueChapters(mangaKey, [chapterId]); toast('Added to download queue'); }
+    } catch (error) { toast(error instanceof Error ? error.message : 'Download failed'); }
+    finally { setBusy(false); }
+  }
+  const label = downloaded ? 'Delete download' : job?.status === 'failed' ? 'Retry download' : job ? 'Cancel queued download' : 'Download chapter';
+  return <button type="button" className={`icon-btn chapter-download ${downloaded ? 'is-downloaded' : ''}`} aria-label={label} title={job?.error ?? label} disabled={busy} onClick={event => { event.stopPropagation(); void act(); }}>
+    {job?.status === 'downloading' ? <span className="download-percent">{job.total ? Math.round(job.done / job.total * 100) : 0}%</span> : <Icon name={downloaded ? 'check' : job?.status === 'failed' ? 'refresh' : job ? 'pause' : 'download'} size={20} />}
+  </button>;
 }

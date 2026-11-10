@@ -1,415 +1,127 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { MangaGrid, MangaList } from '../components/MangaViews';
-import {
-  loadBrowseState,
-  saveBrowseState,
-  type BrowseState,
-} from '../lib/browseState';
-import {
-  addToLibrary,
-  getLibrary,
-  putManga,
-  removeFromLibrary,
-  setLibraryCategory,
-} from '../lib/db';
-import { useNav } from '../lib/nav';
-import { loadSettings, onSettingsChange } from '../lib/settings';
+import Icon from '../components/Icon';
+import Sheet from '../components/Sheet';
+import { EmptyState } from '../components/Feedback';
+import { loadBrowseState, saveBrowseState } from '../lib/browseState';
+import { addToLibrary, getCategories, getLibrary, libraryCategories, putManga, removeFromLibrary, setLibraryCategory } from '../lib/db';
+import { useDataEvents, useOnline, useSettings, useSources } from '../lib/hooks';
 import { useLoad } from '../lib/useLoad';
-import { sources } from '../sources';
-import { CATEGORIES, mangaKey } from '../sources/Source';
+import { useNav } from '../lib/nav';
+import { mangaKey, type SManga, type Source } from '../sources/Source';
 
-export function BrowsePage() {
-  const { openManga } = useNav();
-  // Restore the previous Browse snapshot (query, mode, results, scroll) so
-  // coming back from a manga or another tab feels like a native app.
-  const [initialState] = useState<BrowseState | null>(() => loadBrowseState());
-  const [mode, setMode] = useState<'popular' | 'latest'>(
-    () => initialState?.mode ?? 'popular',
-  );
-  const [query, setQuery] = useState(() => initialState?.query ?? '');
-  const [debouncedQuery, setDebouncedQuery] = useState(
-    () => initialState?.query ?? '',
-  );
-  const restoreRef = useRef<BrowseState | null>(initialState);
-  const scrollYRef = useRef(initialState?.scrollY ?? 0);
-  const scrollRestoredRef = useRef(false);
-  const [libraryView, setLibraryView] = useState(
-    () => loadSettings().libraryView,
-  );
-  const [libraryMap, setLibraryMap] = useState<Record<string, string>>({});
-  const [menuKey, setMenuKey] = useState<string | null>(null);
-  const [menuBusy, setMenuBusy] = useState(false);
-  const [menuError, setMenuError] = useState<string | null>(null);
-
-  const refreshLibrary = useCallback(
-    async (isActive: () => boolean = () => true): Promise<void> => {
-      const records = await getLibrary();
-
-      if (isActive()) {
-        setLibraryMap(
-          Object.fromEntries(
-            records.map((record) => [record.key, record.category]),
-          ),
-        );
-      }
-    },
-    [],
-  );
-
-  const searching = query.trim().length > 0;
-  const waitingForDebounce = query.trim() !== debouncedQuery;
+interface Group { id: string; name: string; items: SManga[]; page: number; loading: boolean; exhausted: boolean; error?: string }
+export default function BrowsePage() {
+  const nav = useNav();
+  const online = useOnline();
+  const settings = useSettings();
+  const sources = useSources();
+  const [initial] = useState(loadBrowseState);
+  const [sourceId, setSourceId] = useState(initial?.sourceId ?? 'mangadex');
+  const [mode, setMode] = useState<'popular' | 'latest'>(initial?.mode ?? 'popular');
+  const [query, setQuery] = useState(initial?.query ?? '');
+  const [search, setSearch] = useState(initial?.query ?? '');
+  const [groups, setGroups] = useState<Group[]>([]);
+  const [attempt, setAttempt] = useState(0);
+  const [menuKey, setMenuKey] = useState('');
+  const [categoryDraft, setCategoryDraft] = useState<string[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [menuError, setMenuError] = useState('');
+  const generation = useRef(0);
+  const restore = useRef(initial);
+  const scrollY = useRef(initial?.scrollY ?? 0);
+  const latest = useRef({ query: search, mode, sourceId, items: [] as SManga[], pages: {} as Record<string, number>, exhausted: {} as Record<string, boolean>, scrollY: 0 });
+  const { data, reload } = useLoad(async () => ({ library: await getLibrary(), categories: await getCategories() }), []);
+  useDataEvents(reload);
+  const sourceStamp = sources.map(s => s.id + ':' + s.kind).join('|');
+  const library = new Map(data?.library.map(entry => [entry.key, entry]) ?? []);
+  const menuItem = groups.flatMap(g => g.items).find(m => mangaKey(m.sourceId, m.id) === menuKey);
 
   useEffect(() => {
-    const timer = window.setTimeout(() => {
-      setDebouncedQuery(query.trim());
-    }, 250);
-
-    return () => {
-      window.clearTimeout(timer);
-    };
+    const timer = setTimeout(() => setSearch(query.trim()), 300);
+    return () => clearTimeout(timer);
   }, [query]);
 
-  useEffect(() => {
-    const unsubscribe = onSettingsChange(() => {
-      setLibraryView(loadSettings().libraryView);
-    });
-
-    return () => {
-      unsubscribe();
-    };
-  }, []);
-
-  useEffect(() => {
-    let active = true;
-
-    void refreshLibrary(() => active).catch(() => {});
-
-    return () => {
-      active = false;
-    };
-  }, [refreshLibrary]);
-
-  useEffect(() => {
-    if (menuKey === null) return;
-
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape' && !menuBusy) {
-        setMenuKey(null);
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown);
-    };
-  }, [menuKey, menuBusy]);
-
-  const { data, loading, error, reload } = useLoad(async () => {
-    // First load after a remount: if the stored snapshot matches this
-    // query/mode, serve it as-is instead of refetching.
-    const stored = restoreRef.current;
-    restoreRef.current = null;
-    if (
-      stored &&
-      stored.query === debouncedQuery &&
-      stored.mode === mode &&
-      stored.items.length > 0
-    ) {
-      return stored.items;
-    }
-
-    const results = await Promise.all(
-      sources.map(async (source) => {
-        const mangas = debouncedQuery
-          ? await source.searchManga(debouncedQuery, 1)
-          : mode === 'popular'
-            ? await source.getPopularManga(1)
-            : await source.getLatestUpdates(1);
-
-        for (const manga of mangas) {
-          void putManga(manga, true).catch(() => {});
-        }
-
-        return mangas;
-      }),
-    );
-
-    const flat = results.flat();
-    saveBrowseState({
-      query: debouncedQuery,
-      mode,
-      items: flat,
-      scrollY: scrollYRef.current,
-    });
-    return flat;
-  }, [mode, debouncedQuery]);
-
-  // Track the scroll position (throttled via rAF) and persist it on
-  // unmount, so Back lands exactly where the user left the list.
-  useEffect(() => {
-    let ticking = false;
-
-    function persistScroll(): void {
-      scrollYRef.current = window.scrollY;
-      const current = loadBrowseState();
-      if (current) {
-        saveBrowseState({ ...current, scrollY: window.scrollY });
-      }
-    }
-
-    function onScroll(): void {
-      if (ticking) return;
-      ticking = true;
-      window.requestAnimationFrame(() => {
-        ticking = false;
-        persistScroll();
-      });
-    }
-
-    window.addEventListener('scroll', onScroll, { passive: true });
-    return () => {
-      window.removeEventListener('scroll', onScroll);
-      persistScroll();
-    };
-  }, []);
-
-  // Restore the scroll position once the (restored or freshly loaded)
-  // results have rendered.
-  useEffect(() => {
-    if (scrollRestoredRef.current) return;
-    if (loading || !data || data.length === 0) return;
-
-    scrollRestoredRef.current = true;
-    const target = initialState?.scrollY ?? 0;
-    if (target <= 0) return;
-
-    window.requestAnimationFrame(() => {
-      window.scrollTo(0, target);
-      window.setTimeout(() => {
-        if (Math.abs(window.scrollY - target) > 4) {
-          window.scrollTo(0, target);
-        }
-      }, 60);
-    });
-  }, [loading, data, initialState]);
-
-  const items = (data ?? []).map((manga) => {
-    const key = mangaKey(manga.sourceId, manga.id);
-
-    return {
-      key,
-      manga,
-      inLibrary: libraryMap[key] !== undefined,
-    };
-  });
-
-  const menuItem = items.find((item) => item.key === menuKey);
-  const menuInLibrary = menuItem
-    ? libraryMap[menuItem.key] !== undefined
-    : false;
-  const menuCategory = menuItem ? libraryMap[menuItem.key] : undefined;
-
-  async function runMenuAction(action: () => Promise<void>): Promise<void> {
-    if (menuBusy) return;
-
-    setMenuBusy(true);
-    setMenuError(null);
-
+  const loadSource = useCallback(async (source: Source, page: number, token: number) => {
+    setGroups(old => old.map(g => g.id === source.id ? { ...g, loading: true, error: undefined } : g));
     try {
-      await action();
-      await refreshLibrary();
-      setMenuKey(null);
-    } catch (cause) {
-      setMenuError(cause instanceof Error ? cause.message : String(cause));
-    } finally {
-      setMenuBusy(false);
+      if (navigator.onLine === false) throw new Error('Reconnect to browse this source. Your saved library and downloads are available offline.');
+      const items = search ? await source.searchManga(search, page) : mode === 'latest' ? await source.getLatestUpdates(page) : await source.getPopularManga(page);
+      if (generation.current !== token) return;
+      await Promise.all(items.map(m => putManga(m, true)));
+      if (generation.current !== token) return;
+      setGroups(old => old.map(g => {
+        if (g.id !== source.id) return g;
+        const combined = page === 1 ? items : [...g.items, ...items];
+        return { ...g, items: [...new Map(combined.map(m => [m.id, m])).values()], page, loading: false, exhausted: !items.length || page > 1 && items.every(m => g.items.some(old => old.id === m.id)), error: undefined };
+      }));
+    } catch (error) {
+      if (generation.current === token) setGroups(old => old.map(g => g.id === source.id ? { ...g, loading: false, error: error instanceof Error ? error.message : 'Source unavailable' } : g));
     }
+  }, [search, mode]);
+
+  useEffect(() => {
+    const token = ++generation.current;
+    const targets = sourceId === 'all' ? sources : sources.filter(s => s.id === sourceId);
+    const saved = restore.current;
+    restore.current = null;
+    if (saved && saved.query === search && saved.mode === mode && (saved.sourceId ?? 'mangadex') === sourceId && saved.items.length && attempt === 0) {
+      setGroups(targets.map(source => ({ id: source.id, name: source.name, items: saved.items.filter(m => m.sourceId === source.id), page: saved.pages?.[source.id] ?? 1, loading: false, exhausted: saved.exhausted?.[source.id] ?? false })));
+      requestAnimationFrame(() => window.scrollTo(0, saved.scrollY));
+      return;
+    }
+    scrollY.current = 0;
+    setGroups(targets.map(s => ({ id: s.id, name: s.name, items: [], page: 0, loading: true, exhausted: false })));
+    // A failing source does not cancel other sources; limit parallel requests.
+    void (async () => {
+      for (let i = 0; i < targets.length && generation.current === token; i += 4) await Promise.allSettled(targets.slice(i, i + 4).map(source => loadSource(source, 1, token)));
+    })();
+    return () => { generation.current++; };
+  }, [sourceId, mode, search, sourceStamp, attempt, loadSource]);
+
+  useEffect(() => {
+    latest.current = { query: search, mode, sourceId, items: groups.flatMap(g => g.items), pages: Object.fromEntries(groups.map(g => [g.id, g.page])), exhausted: Object.fromEntries(groups.map(g => [g.id, g.exhausted])), scrollY: scrollY.current };
+    if (groups.length) saveBrowseState(latest.current);
+  }, [groups, search, mode, sourceId]);
+  useEffect(() => {
+    const persist = () => { scrollY.current = window.scrollY; saveBrowseState({ ...latest.current, scrollY: scrollY.current }); };
+    window.addEventListener('scroll', persist, { passive: true });
+    return () => { window.removeEventListener('scroll', persist); persist(); };
+  }, []);
+
+  function openMenu(key: string) {
+    setMenuKey(key); setMenuError('');
+    const entry = library.get(key);
+    setCategoryDraft(entry ? libraryCategories(entry) : ['Default']);
   }
-
-  return (
-    <div className="screen">
-      <header className="topbar">
-        <h1>Browse</h1>
-      </header>
-
-      <div className="searchbar">
-        <input
-          type="search"
-          aria-label="Search manga"
-          placeholder="Search manga…"
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-        />
-        {query !== '' && (
-          <button
-            type="button"
-            className="btn-ghost"
-            aria-label="Clear search"
-            onClick={() => setQuery('')}
-          >
-            Clear
-          </button>
-        )}
-      </div>
-
-      {!searching && (
-        <div className="seg" role="group" aria-label="Browse mode">
-          <button
-            type="button"
-            className={mode === 'popular' ? 'active' : ''}
-            aria-pressed={mode === 'popular'}
-            onClick={() => setMode('popular')}
-          >
-            Popular
-          </button>
-          <button
-            type="button"
-            className={mode === 'latest' ? 'active' : ''}
-            aria-pressed={mode === 'latest'}
-            onClick={() => setMode('latest')}
-          >
-            Latest
-          </button>
-        </div>
-      )}
-
-      {loading || waitingForDebounce ? (
-        <div className="spinner" role="status" aria-label="Loading manga" />
-      ) : error !== null ? (
-        <div className="error">
-          <p role="alert">{error}</p>
-          <button type="button" className="btn" onClick={reload}>
-            Retry
-          </button>
-        </div>
-      ) : items.length === 0 ? (
-        <div className="empty">No results.</div>
-      ) : libraryView === 'list' ? (
-        <MangaList
-          items={items}
-          onOpen={openManga}
-          onMenu={(key) => {
-            setMenuError(null);
-            setMenuKey(key);
-          }}
-        />
-      ) : (
-        <MangaGrid
-          items={items}
-          onOpen={openManga}
-          onMenu={(key) => {
-            setMenuError(null);
-            setMenuKey(key);
-          }}
-        />
-      )}
-
-      {menuItem && (
-        <div
-          style={{
-            position: 'fixed',
-            inset: 0,
-            background: 'rgba(0,0,0,0.55)',
-            zIndex: 1000,
-          }}
-          onClick={() => {
-            if (!menuBusy) {
-              setMenuKey(null);
-            }
-          }}
-        >
-          <div
-            className="menu-sheet"
-            role="dialog"
-            aria-modal="true"
-            aria-label={`Library options for ${menuItem.manga.title}`}
-            onClick={(event) => event.stopPropagation()}
-            style={{
-              position: 'absolute',
-              bottom: 0,
-              left: 0,
-              right: 0,
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 8,
-            }}
-          >
-            <h3>{menuItem.manga.title}</h3>
-
-            {!menuInLibrary && (
-              <button
-                type="button"
-                className="btn"
-                disabled={menuBusy}
-                onClick={() => {
-                  void runMenuAction(async () => {
-                    await putManga(menuItem.manga, true);
-                    await addToLibrary(menuItem.key, 'Default');
-                  });
-                }}
-              >
-                Add to Library
-              </button>
-            )}
-
-            <p style={{ color: 'var(--dim)', margin: 0 }}>
-              {menuInLibrary ? 'Move to category' : 'Add to category'}
-            </p>
-
-            {CATEGORIES.map((cat) => (
-              <button
-                key={cat}
-                type="button"
-                className="btn-ghost"
-                disabled={menuBusy || (menuInLibrary && cat === menuCategory)}
-                onClick={() => {
-                  void runMenuAction(async () => {
-                    if (menuInLibrary) {
-                      await setLibraryCategory(menuItem.key, cat);
-                    } else {
-                      await putManga(menuItem.manga, true);
-                      await addToLibrary(menuItem.key, cat);
-                    }
-                  });
-                }}
-              >
-                {(menuInLibrary && cat === menuCategory ? '✓ ' : '') + cat}
-              </button>
-            ))}
-
-            {menuInLibrary && (
-              <button
-                type="button"
-                className="btn-danger"
-                disabled={menuBusy}
-                onClick={() => {
-                  void runMenuAction(() => removeFromLibrary(menuItem.key));
-                }}
-              >
-                Remove from Library
-              </button>
-            )}
-
-            {menuError && (
-              <p className="error" role="alert">
-                {menuError}
-              </p>
-            )}
-
-            <button
-              type="button"
-              className="btn-ghost"
-              disabled={menuBusy}
-              onClick={() => setMenuKey(null)}
-            >
-              Close
-            </button>
-          </div>
-        </div>
-      )}
-    </div>
-  );
+  async function menuAction(action: () => Promise<void>) {
+    setBusy(true); setMenuError('');
+    try { await action(); reload(); setMenuKey(''); }
+    catch (error) { setMenuError(error instanceof Error ? error.message : 'Unable to update library'); }
+    finally { setBusy(false); }
+  }
+  return <main className="screen">
+    <header className="topbar"><h1>Browse</h1><button className="icon-btn" aria-label="Refresh browse results" disabled={!online || groups.some(g => g.loading)} onClick={() => setAttempt(v => v + 1)}><Icon name="refresh" /></button><button className="icon-btn" aria-label="Connect more sources" onClick={nav.openConnections}><Icon name="cloud" /></button></header>
+    <div className="browse-toolbar"><select aria-label="Browse source" value={sourceId} onChange={e => setSourceId(e.target.value)}><option value="all">All sources</option>{!sources.some(s => s.id === sourceId) && sourceId !== 'all' && <option value={sourceId}>Source unavailable</option>}{sources.map(s => <option key={s.id} value={s.id}>{s.name}{s.lang ? ' (' + s.lang.toUpperCase() + ')' : ''}{s.id === 'sample' ? ' · demo' : ''}</option>)}</select></div>
+    <div className="searchbar"><Icon name="search" /><input type="search" aria-label="Search manga" placeholder="Search titles" value={query} onChange={e => setQuery(e.target.value)} /></div>
+    {!search && <div className="seg" aria-label="Browse mode"><button className={mode === 'popular' ? 'active' : ''} aria-pressed={mode === 'popular'} onClick={() => setMode('popular')}>Popular</button><button className={mode === 'latest' ? 'active' : ''} aria-pressed={mode === 'latest'} onClick={() => setMode('latest')}>Latest</button></div>}
+    {!groups.length && <EmptyState icon="cloud" title="Connect a source"><p>Connect Suwayomi or install a web extension to browse more sources.</p><button className="btn" onClick={nav.openConnections}>Connections</button></EmptyState>}
+    {groups.map(group => {
+      const source = sources.find(s => s.id === group.id);
+      const items = group.items.map(m => ({ key: mangaKey(m.sourceId, m.id), manga: m, inLibrary: library.has(mangaKey(m.sourceId, m.id)) }));
+      return <section className="source-section" key={group.id} aria-label={group.name}>
+        {sourceId === 'all' && <div className="section-heading"><h3>{group.name}</h3><span>{group.items.length} titles</span></div>}
+        {group.error && <div className="inline-error" role="alert">{group.error}{online && source && <button className="text-btn" disabled={group.loading} onClick={() => void loadSource(source, Math.max(1, group.page), generation.current)}>Retry source</button>}</div>}
+        {items.length > 0 && (settings.libraryView === 'grid' ? <MangaGrid items={items} onOpen={nav.openManga} onMenu={openMenu} /> : <MangaList items={items} onOpen={nav.openManga} onMenu={openMenu} />)}
+        {group.loading ? <div className="spinner" role="status" aria-label={'Loading ' + group.name} /> : !items.length && !group.error ? <EmptyState icon="search" title="No titles found"><p>Try another search or source.</p></EmptyState> : items.length > 0 && source && !group.exhausted && <div className="load-more"><button className="btn-ghost outlined" disabled={!online} onClick={() => void loadSource(source, group.page + 1, generation.current)}>Load more</button></div>}
+      </section>;
+    })}
+    {menuItem && <Sheet title={menuItem.title} onClose={() => setMenuKey('')}>
+      {menuError && <p className="error" role="alert">{menuError}</p>}
+      <p className="muted">Save this title to one or more library categories.</p>
+      {data?.categories.map(c => <label className="form-row" key={c.id}>{c.name}<input type="checkbox" checked={categoryDraft.includes(c.name)} onChange={e => setCategoryDraft(old => e.target.checked ? [...old, c.name] : old.filter(n => n !== c.name))} /></label>)}
+      <button className="btn wide" disabled={busy} onClick={() => void menuAction(() => library.has(menuKey) ? setLibraryCategory(menuKey, categoryDraft) : addToLibrary(menuKey, categoryDraft))}>{library.has(menuKey) ? 'Save categories' : 'Add to library'}</button>
+      {library.has(menuKey) && <button className="text-btn danger" disabled={busy} onClick={() => { if (window.confirm('Remove this title from your library? Reading progress is kept.')) void menuAction(() => removeFromLibrary(menuKey)); }}>Remove from library</button>}
+    </Sheet>}
+  </main>;
 }
-
-export default BrowsePage;

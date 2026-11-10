@@ -14,6 +14,7 @@ export function useLoad<T>(
   const [error, setError] = useState<string | null>(null);
   const [reloadCount, setReloadCount] = useState(0);
   const runId = useRef(0);
+  const inputs = useRef(deps);
 
   const reload = useCallback(() => {
     setReloadCount((count) => count + 1);
@@ -24,7 +25,8 @@ export function useLoad<T>(
     const currentRun = ++runId.current;
     let active = true;
 
-    setData(null);
+    if (deps.length !== inputs.current.length || deps.some((value, i) => !Object.is(value, inputs.current[i]))) setData(null);
+    inputs.current = deps;
     setLoading(true);
     setError(null);
 

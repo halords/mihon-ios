@@ -12,6 +12,9 @@ export interface BrowseState {
   mode: 'popular' | 'latest';
   items: SManga[];
   scrollY: number;
+  sourceId?: string;
+  pages?: Record<string, number>;
+  exhausted?: Record<string, boolean>;
 }
 
 const STORAGE_KEY = 'mihon:browse-state-v1';

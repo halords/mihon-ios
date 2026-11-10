@@ -52,16 +52,16 @@ export default function ExtensionsPage() {
     ];
     setIndexStates(all);
     await Promise.all(
-      all.map(async (state, i) => {
+      all.map(async (state) => {
         try {
           const index = await fetchExtensionIndex(state.url);
           setIndexStates((prev) =>
-            prev.map((s, j) => (j === i ? { ...s, index } : s)),
+            prev.map((s) => (s.url === state.url ? { ...s, index } : s)),
           );
         } catch (error) {
           setIndexStates((prev) =>
-            prev.map((s, j) =>
-              j === i
+            prev.map((s) =>
+              s.url === state.url
                 ? {
                     ...s,
                     error:

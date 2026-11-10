@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#141318">
+  <title>Connect your Mihon sources</title>
+  <style>
+    :root { color-scheme: dark; font: 16px/1.65 system-ui,sans-serif; background:#141318; color:#e7e0e9 }
+    body { max-width:720px; margin:auto; padding:24px max(20px,env(safe-area-inset-right)) 40px max(20px,env(safe-area-inset-left)) }
+    h1 { font-size:1.75rem; line-height:1.2 } h2 { font-size:1.15rem; margin-top:2rem }
+    a { color:#d0bcff; overflow-wrap:anywhere } li { margin:.65rem 0 } ol { padding-left:1.5rem }
+    pre { overflow:auto; padding:16px; background:#211f26; border-radius:14px; font-size:.85rem }
+    code { font-family:ui-monospace,monospace } strong { color:#f6edff } .muted { color:#c8c1cd }
+  </style>
+</head>
+<body>
+  <a href="/#/connections">← Back to Connections</a>
+  <h1>Connect your Mihon sources</h1>
+  <p>Suwayomi runs Mihon-compatible Android extensions on your computer or server. This PWA keeps your library, reading progress, and downloaded pages on your iPhone.</p>
+  <h2>Start the included server</h2>
+  <ol>
+    <li>On a computer with Docker, open the <a href="https://github.com/halords/mihon-ios" target="_blank" rel="noopener noreferrer">PWA repository</a>. Copy <code>.env.example</code> to <code>.env</code> and choose <code>SUWAYOMI_PASSWORD</code>.</li>
+    <li>Run <code>docker compose up --build -d</code>. Open <code>http://localhost:4567</code> on that computer and sign in with username <code>reader</code> and your chosen password.</li>
+    <li>In Suwayomi’s WebUI, add an extension repository you trust and install the sources used by your Mihon library.</li>
+    <li>In this app’s Connections, enter those credentials and choose <strong>Use bundled server</strong>.</li>
+  </ol>
+  <p class="muted">For an existing server, enter its HTTPS URL instead. Basic authentication is supported. For authenticated backup uploads, use the bundled proxy or restore the original file through Suwayomi’s WebUI.</p>
+  <h2>Install on your iPhone</h2>
+  <p>Serve the PWA over trusted HTTPS. For the included Caddy setup, point a domain to your Docker host, set <code>MIHON_DOMAIN</code> in <code>.env</code>, and run:</p>
+  <pre>docker compose --profile https up --build -d</pre>
+  <p>Open your HTTPS domain in Safari, then choose <strong>Share → Add to Home Screen</strong>. Use your installed app for both importing and reading so its data stays in the same storage.</p>
+  <h2>Move your library and downloads</h2>
+  <ol>
+    <li>In <strong>More → Backup &amp; restore</strong>, choose your <code>.tachibk</code> file, review the import, and restore it.</li>
+    <li>In <strong>Connections</strong>, choose <strong>Copy to server</strong> beside the retained backup. Refresh your connected sources after installing the matching extensions.</li>
+    <li>Open a title and download chapters. Keep the app visible while the queue runs; completed chapters work in airplane mode.</li>
+    <li>To move existing Android downloads, put each chapter’s numbered images in a ZIP/CBZ file. Choose that imported title as the destination under <strong>Import offline chapters</strong>. Keep exact chapter names when numbers are ambiguous.</li>
+  </ol>
+  <p>A Mihon backup contains metadata and progress; its chapter images are separate. Export this PWA’s library as JSON and save its downloaded chapters as CBZ from Downloads when moving devices.</p>
+  <p class="muted">iOS can suspend background downloads and evict browser storage. Request persistent storage in Settings, keep enough free space, and retain your exports.</p>
+  <h2>Detailed instructions</h2>
+  <p><a href="https://github.com/halords/mihon-ios" target="_blank" rel="noopener noreferrer">PWA repository</a> · <a href="https://github.com/Suwayomi/Suwayomi-Server" target="_blank" rel="noopener noreferrer">Suwayomi releases and documentation</a> · <a href="https://github.com/mihonapp/mihon" target="_blank" rel="noopener noreferrer">Mihon Android</a></p>
+</body>
+</html>

@@ -7,6 +7,7 @@ import type {
   Source,
 } from './Source';
 import { coverArt } from './svgArt';
+import { loadSettings } from '../lib/settings';
 
 const BASE = 'https://api.mangadex.org';
 const UPLOADS = 'https://uploads.mangadex.org';
@@ -63,6 +64,7 @@ interface MdChapterAttributes {
   publishAt?: string;
   externalUrl?: string | null;
   pages?: number;
+  translatedLanguage?: string;
 }
 
 interface MdChapter {
@@ -82,6 +84,7 @@ interface MdAtHome {
   chapter?: {
     hash?: string;
     data?: string[];
+    dataSaver?: string[];
   };
 }
 
@@ -186,6 +189,9 @@ function mapManga(m: MdManga): SManga {
 export const mangadexSource: Source = {
   id: SOURCE_ID,
   name: 'MangaDex',
+  lang: 'multi',
+  kind: 'builtin',
+  baseUrl: 'https://mangadex.org',
 
   async getPopularManga(page: number): Promise<SManga[]> {
     const offset = (Math.max(1, page) - 1) * LIST_LIMIT;
@@ -276,7 +282,7 @@ export const mangadexSource: Source = {
 
     while (true) {
       const url = buildUrl(`/manga/${mangaId}/feed`, [
-        ['translatedLanguage[]', 'en'],
+        ...loadSettings().chapterLanguages.map((lang): [string, string] => ['translatedLanguage[]', lang]),
         ...RATINGS.map((r): [string, string] => ['contentRating[]', r]),
         ['order[volume]', 'asc'],
         ['order[chapter]', 'asc'],
@@ -310,13 +316,15 @@ export const mangadexSource: Source = {
     return all;
   },
 
-  async getPageList(chapterId: string): Promise<MangaPage[]> {
-    const res = await cachedJson<MdAtHome>(
+  async getPageList(chapterId: string, _mangaId?: string, signal?: AbortSignal): Promise<MangaPage[]> {
+    const res = await fetchJson<MdAtHome>(
       `${BASE}/at-home/server/${chapterId}`,
+      { signal },
     );
     const baseUrl = res.baseUrl;
     const hash = res.chapter?.hash;
-    const files = res.chapter?.data ?? [];
+    const saver = loadSettings().dataSaver && !!res.chapter?.dataSaver?.length;
+    const files = saver ? res.chapter!.dataSaver! : res.chapter?.data ?? [];
 
     if (!baseUrl || !hash) {
       throw new Error('MangaDex did not return page data for this chapter');
@@ -338,7 +346,7 @@ export const mangadexSource: Source = {
     }
 
     return files.map((f) => ({
-      imageUrl: cdnUrl(`${baseUrl}/data/${hash}/${f}`),
+      imageUrl: cdnUrl(`${baseUrl}/${saver ? 'data-saver' : 'data'}/${hash}/${f}`),
     }));
   },
 };

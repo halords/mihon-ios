@@ -7,7 +7,7 @@ import {
 import { registerSource, unregisterSource } from '../sources/index';
 import type { Source } from '../sources/Source';
 import { chapterKey, mangaKey } from '../sources/Source';
-import { proxiedUrl } from './fetchJson';
+import { fetchJson, fetchWithTimeout, proxiedUrl } from './fetchJson';
 
 // Extension system: sources can be installed at runtime from an extension
 // index (a JSON file hosted anywhere), Mihon-style. A plugin is a single
@@ -43,13 +43,9 @@ const MAX_MODULE_BYTES = 2_000_000;
 
 const hostApi: MihonHostApi = {
   apiVersion: 1,
-  async fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
-    const res = await fetch(url, init);
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    return (await res.json()) as T;
-  },
+  fetchJson,
   async fetchText(url: string, init?: RequestInit): Promise<string> {
-    const res = await fetch(url, init);
+    const res = await fetchWithTimeout(proxiedUrl(url), init);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     return res.text();
   },
@@ -136,14 +132,14 @@ function normalizeManifest(raw: unknown, indexUrl: string): ExtensionManifest {
     version: entry.version === undefined ? '0' : String(entry.version),
     lang: typeof entry.lang === 'string' ? entry.lang : undefined,
     nsfw: entry.nsfw === true,
-    moduleUrl: new URL(moduleUrl, indexUrl).toString(),
+    moduleUrl: new URL(moduleUrl, new URL(indexUrl, location.href || location.origin)).toString(),
   };
 }
 
 export async function fetchExtensionIndex(
   indexUrl: string,
 ): Promise<ExtensionIndex> {
-  const res = await fetch(indexUrl, { cache: 'no-store' });
+  const res = await fetchWithTimeout(proxiedUrl(indexUrl), { cache: 'no-store' });
   if (!res.ok) throw new Error(`Index fetch failed: HTTP ${res.status}`);
   const data: unknown = await res.json();
   const list: unknown[] = Array.isArray(data)
@@ -165,7 +161,7 @@ export async function installExtension(
   manifest: ExtensionManifest,
   indexUrl: string,
 ): Promise<void> {
-  const res = await fetch(manifest.moduleUrl, { cache: 'no-store' });
+  const res = await fetchWithTimeout(proxiedUrl(manifest.moduleUrl), { cache: 'no-store' });
   if (!res.ok) throw new Error(`Module fetch failed: HTTP ${res.status}`);
   const code = await res.text();
   // Evaluate BEFORE persisting: a module that cannot load is never stored.
@@ -186,7 +182,7 @@ export async function installExtension(
   };
   await putInstalledPlugin(record);
   pluginErrors.delete(manifest.id);
-  registerSource(source);
+  registerSource(source, 'extension');
 }
 
 export async function removeExtension(id: string): Promise<void> {
@@ -210,7 +206,7 @@ export async function initPlugins(): Promise<void> {
   for (const record of records) {
     try {
       const source = await evaluatePlugin(record.code, record.id);
-      registerSource(source);
+      registerSource(source, 'extension');
     } catch (error) {
       pluginErrors.set(
         record.id,

@@ -2,3 +2,10 @@ node_modules
 dist
 .prompts/
 .lane-out/
+test-results/
+playwright-report/
+.env
+.env.local
+*.tachibk
+*.cbz
+*.mihon.zip

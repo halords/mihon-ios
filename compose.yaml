@@ -1,0 +1,51 @@
+services:
+  app:
+    build: .
+    init: true
+    restart: unless-stopped
+    environment:
+      PORT: "4173"
+      SUWAYOMI_URL: http://suwayomi:4567
+    ports:
+      - "127.0.0.1:4173:4173"
+    depends_on:
+      - suwayomi
+
+  suwayomi:
+    image: ghcr.io/suwayomi/suwayomi-server:v2.4.2366
+    init: true
+    restart: unless-stopped
+    environment:
+      BIND_IP: "0.0.0.0"
+      BIND_PORT: "4567"
+      AUTH_MODE: BASIC_AUTH
+      AUTH_USERNAME: "${SUWAYOMI_USERNAME:-reader}"
+      AUTH_PASSWORD: "${SUWAYOMI_PASSWORD:?Set SUWAYOMI_PASSWORD in .env}"
+      DOWNLOAD_AS_CBZ: "true"
+      WEB_UI_ENABLED: "true"
+      EXTENSION_STORES: "${SUWAYOMI_EXTENSION_STORES:-[]}"
+    volumes:
+      - suwayomi-data:/home/suwayomi/.local/share/Tachidesk
+    ports:
+      - "127.0.0.1:4567:4567"
+
+  https:
+    image: caddy:2-alpine
+    profiles: [https]
+    restart: unless-stopped
+    environment:
+      MIHON_DOMAIN: "${MIHON_DOMAIN:-localhost}"
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - app
+
+volumes:
+  suwayomi-data:
+  caddy-data:
+  caddy-config:

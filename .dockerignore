@@ -1,0 +1,14 @@
+.git
+.openai
+node_modules
+dist
+test-results
+playwright-report
+.env
+.env.*
+*.tachibk
+*.cbz
+*.zip
+*.log
+.prompts
+.lane-out

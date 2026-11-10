@@ -1,238 +1,42 @@
 import { useState } from 'react';
-import { useNav } from '../lib/nav';
+import { getAllManga, getDB, getLibrary } from '../lib/db';
+import { checkLibraryUpdates, getLibraryUpdates } from '../lib/updates';
+import { useDataEvents, useOnline } from '../lib/hooks';
 import { useLoad } from '../lib/useLoad';
-import {
-  getLibrary,
-  getManga,
-  getChapterMetas,
-  getChapterStates,
-  putChapterMetas,
-} from '../lib/db';
-import type { SManga, SChapter } from '../sources/Source';
+import { useNav } from '../lib/nav';
 import { getSource } from '../sources';
-import { cdnUrl } from '../lib/fetchJson';
-
-interface UpdateRow {
-  mangaKey: string;
-  manga: SManga;
-  totalChapters: number;
-  unread: number;
-  sourceOk: boolean;
-}
-
-interface NewChapter {
-  mangaKey: string;
-  mangaTitle: string;
-  chapter: SChapter;
-}
+import Icon from '../components/Icon';
+import Cover from '../components/Cover';
+import DownloadButton from '../components/DownloadButton';
+import { EmptyState, toast } from '../components/Feedback';
+import { splitMangaKey } from '../sources/Source';
 
 export default function UpdatesPage() {
   const nav = useNav();
+  const online = useOnline();
   const [refreshing, setRefreshing] = useState(false);
-  const [newChapters, setNewChapters] = useState<NewChapter[] | null>(null);
-  const [lastChecked, setLastChecked] = useState<number | null>(null);
-  const [refreshError, setRefreshError] = useState<string | null>(null);
-
-  const { data, loading, error, reload } = useLoad<UpdateRow[]>(async () => {
-    const library = await getLibrary();
-    const rows: UpdateRow[] = [];
-
-    for (const entry of library) {
-      const stored = await getManga(entry.key);
-      if (!stored) continue;
-
-      const [sourceId = ''] = entry.key.split('::');
-      const metas = await getChapterMetas(entry.key);
-      const states = await getChapterStates(entry.key);
-      const readKeys = new Set(states.filter((s) => s.read).map((s) => s.key));
-      const unread = metas.filter(
-        (m) => !m.chapter.external && !readKeys.has(m.key),
-      ).length;
-      const sourceOk = !!getSource(sourceId) && stored.sourceAvailable;
-
-      rows.push({
-        mangaKey: entry.key,
-        manga: stored.manga,
-        totalChapters: metas.filter((m) => !m.chapter.external).length,
-        unread,
-        sourceOk,
-      });
-    }
-
-    return rows.sort((a, b) => a.manga.title.localeCompare(b.manga.title));
+  const [progress, setProgress] = useState('');
+  const { data, loading, error, reload } = useLoad(async () => {
+    const db = await getDB();
+    const [library, manga, states, snapshot] = await Promise.all([getLibrary(), getAllManga(), db.getAll('chapterState'), getLibraryUpdates()]);
+    return { library, manga: new Map(manga.map(m => [m.key, m])), states: new Map(states.map(s => [s.key, s])), snapshot };
   }, []);
-
+  useDataEvents(reload);
   async function refresh() {
     setRefreshing(true);
-    setRefreshError(null);
-
-    try {
-      const library = await getLibrary();
-      const sourceIds = new Set(
-        library.map((entry) => entry.key.split('::')[0] ?? ''),
-      );
-
-      // Check each source before diffing any chapter lists.
-      for (const sourceId of sourceIds) {
-        const source = getSource(sourceId);
-        if (source) {
-          try {
-            await source.getLatestUpdates(1);
-          } catch {
-            // A latest-updates failure should not prevent chapter checks.
-          }
-        }
-      }
-
-      const found: NewChapter[] = [];
-
-      for (const entry of library) {
-        const key = entry.key;
-        const sep = key.indexOf('::');
-        const sourceId = key.slice(0, sep);
-        const mangaId = key.slice(sep + 2);
-        const source = getSource(sourceId);
-        if (!source) continue;
-
-        const stored = await getManga(key);
-        if (!stored) continue;
-
-        const before = await getChapterMetas(key);
-        const beforeIds = new Set(before.map((m) => m.chapter.id));
-        const fresh = await source.getChapterList(mangaId);
-        const newOnes = fresh.filter(
-          (c) => !c.external && !beforeIds.has(c.id),
-        );
-
-        if (newOnes.length > 0) {
-          await putChapterMetas(sourceId, mangaId, fresh);
-          for (const chapter of newOnes) {
-            found.push({
-              mangaKey: key,
-              mangaTitle: stored.manga.title,
-              chapter,
-            });
-          }
-        }
-      }
-
-      found.sort((a, b) => b.chapter.dateUpload - a.chapter.dateUpload);
-      setNewChapters(found);
-      setLastChecked(Date.now());
-      reload();
-    } catch (e) {
-      setRefreshError(e instanceof Error ? e.message : 'Refresh failed');
-    } finally {
-      setRefreshing(false);
-    }
+    try { await checkLibraryUpdates((done, total) => setProgress(done + ' / ' + total + ' titles')); reload(); }
+    catch (error) { toast(error instanceof Error ? error.message : 'Unable to check updates'); }
+    finally { setRefreshing(false); setProgress(''); }
   }
-
-  return (
-    <div className="screen">
-      <header className="topbar">
-        <h1>Updates</h1>
-        <button
-          type="button"
-          className="btn"
-          disabled={refreshing}
-          onClick={refresh}
-        >
-          {refreshing ? 'Checking…' : 'Refresh'}
-        </button>
-      </header>
-
-      {refreshError && (
-        <div className="error">
-          <p role="alert">{refreshError}</p>
-        </div>
-      )}
-
-      {newChapters !== null && (
-        <section>
-          <h3>New chapters</h3>
-          {newChapters.length === 0 ? (
-            <div className="empty">
-              No new chapters found
-              {lastChecked
-                ? ` · checked ${new Date(lastChecked).toLocaleTimeString()}`
-                : ''}
-            </div>
-          ) : (
-            newChapters.map((nc) => (
-              <button
-                type="button"
-                className="list-row"
-                key={`${nc.mangaKey}::${nc.chapter.id}`}
-                style={{ width: '100%', textAlign: 'left' }}
-                onClick={() => nav.openReader(nc.mangaKey, nc.chapter.id)}
-              >
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontWeight: 600 }}>{nc.mangaTitle}</div>
-                  <small style={{ display: 'block', opacity: 0.65 }}>
-                    {nc.chapter.name}
-                  </small>
-                  <small style={{ display: 'block', opacity: 0.65 }}>
-                    {new Date(nc.chapter.dateUpload).toLocaleDateString()}
-                  </small>
-                </div>
-              </button>
-            ))
-          )}
-        </section>
-      )}
-
-      <section>
-        <h3>Library status</h3>
-        {loading && <div className="spinner" role="status" />}
-        {error && (
-          <div className="error">
-            <p role="alert">{error}</p>
-            <button type="button" className="btn" onClick={reload}>
-              Retry
-            </button>
-          </div>
-        )}
-        {data !== null &&
-          (data.length === 0 ? (
-            <div className="empty">
-              Your library is empty. Add manga from Browse.
-            </div>
-          ) : (
-            data.map((row) => (
-              <button
-                type="button"
-                className="list-row"
-                key={row.mangaKey}
-                style={{ width: '100%', textAlign: 'left' }}
-                onClick={() => nav.openManga(row.mangaKey)}
-              >
-                {row.manga.coverUrl ? (
-                  <img referrerPolicy="no-referrer"
-                    src={cdnUrl(row.manga.coverUrl)}
-                    alt=""
-                    width={40}
-                    style={{ flexShrink: 0 }}
-                  />
-                ) : (
-                  <div
-                    className="cover"
-                    style={{ width: 40, height: 56, flexShrink: 0 }}
-                  />
-                )}
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontWeight: 600 }}>{row.manga.title}</div>
-                  <small style={{ display: 'block', opacity: 0.65 }}>
-                    {`${row.totalChapters} chapters`}
-                  </small>
-                </div>
-                {row.unread > 0 && (
-                  <span className="chip">{row.unread} unread</span>
-                )}
-                {!row.sourceOk && <span className="chip">No source</span>}
-              </button>
-            ))
-          ))}
-      </section>
-    </div>
-  );
+  return <main className="screen"><header className="topbar"><h1>Updates</h1><button className="icon-btn" aria-label="Check library updates" disabled={refreshing || !online || !data?.library.length} onClick={() => void refresh()}><Icon name="refresh" /></button></header>
+    {refreshing && <p className="status-message" role="status">Checking {progress}…</p>}
+    {data?.snapshot && <p className="update-summary">Checked {new Date(data.snapshot.lastChecked).toLocaleString()} · {data.snapshot.checked} titles checked · {data.snapshot.found} new chapters{data.snapshot.unavailable ? ' · ' + data.snapshot.unavailable + ' titles need sources or local files' : ''}</p>}
+    {!!data?.snapshot?.failures.length && <details className="notes-section"><summary>{data.snapshot.failures.length} titles could not be checked</summary>{data.snapshot.failures.map((message, i) => <p className="muted" key={i}>{message}</p>)}</details>}
+    {loading && !data ? <div className="spinner" role="status" aria-label="Loading updates" /> : error ? <p className="error" role="alert">{error}</p> : !data?.library.length ? <EmptyState icon="refresh" title="Your next chapter awaits"><p>Add titles to your library to check for new chapters.</p><button className="btn" onClick={() => nav.setTab('browse')}>Browse sources</button></EmptyState> : !data.snapshot?.chapters.length ? <EmptyState icon="refresh" title={data.snapshot ? 'No new chapters yet' : 'Check your library'}><p>{online ? 'Check your connected sources for new chapters. Results stay saved on this device.' : 'Reconnect to check for new chapters. Your downloads are available offline.'}</p><button className="btn" disabled={!online || refreshing} onClick={() => void refresh()}>Check for updates</button></EmptyState> : data.snapshot.chapters.map(update => {
+      const key = update.mangaKey + '::' + update.chapter.id;
+      const [sourceId, mangaId] = splitMangaKey(update.mangaKey);
+      const downloaded = !!data.states.get(key)?.downloaded;
+      return <div className="update-row" key={key}><Cover url={update.coverUrl} title={update.mangaTitle} /><button className="update-title" onClick={() => nav.openManga(update.mangaKey)}><strong>{update.mangaTitle}</strong><small>{update.chapter.name}</small><small>{new Date(update.foundAt).toLocaleDateString()}{data.states.get(key)?.read ? ' · Read' : ' · Unread'}</small></button><button className="icon-btn accent" aria-label={'Read ' + update.chapter.name} disabled={!downloaded && !(online && getSource(sourceId))} onClick={() => nav.openReader(update.mangaKey, update.chapter.id)}><Icon name="play" size={21} /></button><DownloadButton mangaKey={update.mangaKey} sourceId={sourceId} mangaId={mangaId} chapterId={update.chapter.id} downloaded={downloaded} /></div>;
+    })}
+  </main>;
 }

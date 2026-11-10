@@ -1,4 +1,4 @@
-export type ReaderMode = 'vertical' | 'paged';
+export type ReaderMode = 'vertical' | 'paged' | 'rtl';
 export type ThemeName = 'dark' | 'light';
 export type LibraryView = 'grid' | 'list';
 
@@ -8,6 +8,14 @@ export interface Settings {
   proxyBase: string;
   libraryView: LibraryView;
   extensionIndexes: string[];
+  downloadedOnly: boolean;
+  librarySort: 'title' | 'added' | 'read' | 'unread';
+  sortDescending: boolean;
+  dataSaver: boolean;
+  continuousReading: boolean;
+  readerFit: 'width' | 'screen';
+  suwayomiUrl: string;
+  chapterLanguages: string[];
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -16,6 +24,14 @@ export const DEFAULT_SETTINGS: Settings = {
   proxyBase: '',
   libraryView: 'grid',
   extensionIndexes: [],
+  downloadedOnly: false,
+  librarySort: 'title',
+  sortDescending: false,
+  dataSaver: true,
+  continuousReading: true,
+  readerFit: 'screen',
+  suwayomiUrl: '',
+  chapterLanguages: ['en'],
 };
 
 const STORAGE_KEY = 'mihon-settings';
@@ -31,7 +47,7 @@ function normalizeSettings(value: unknown): Settings {
   return {
     ...DEFAULT_SETTINGS,
     readerMode:
-      stored.readerMode === 'vertical' || stored.readerMode === 'paged'
+      stored.readerMode === 'vertical' || stored.readerMode === 'paged' || stored.readerMode === 'rtl'
         ? stored.readerMode
         : DEFAULT_SETTINGS.readerMode,
     theme:
@@ -52,6 +68,17 @@ function normalizeSettings(value: unknown): Settings {
             typeof value === 'string' && value.length > 0,
         )
       : DEFAULT_SETTINGS.extensionIndexes,
+    downloadedOnly: stored.downloadedOnly === true,
+    librarySort: ['title', 'added', 'read', 'unread'].includes(String(stored.librarySort))
+      ? stored.librarySort as Settings['librarySort'] : 'title',
+    sortDescending: stored.sortDescending === true,
+    dataSaver: stored.dataSaver !== false,
+    continuousReading: stored.continuousReading !== false,
+    readerFit: stored.readerFit === 'width' ? 'width' : 'screen',
+    suwayomiUrl: typeof stored.suwayomiUrl === 'string' ? stored.suwayomiUrl.replace(/\/+$/, '') : '',
+    chapterLanguages: Array.isArray(stored.chapterLanguages) && stored.chapterLanguages.some(v => typeof v === 'string' && v.length > 0)
+      ? [...new Set(stored.chapterLanguages.filter((v): v is string => typeof v === 'string' && v.length > 0))]
+      : ['en'],
   };
 }
 
@@ -114,7 +141,7 @@ export function applyTheme(theme: ThemeName): void {
 
   themeColor?.setAttribute(
     'content',
-    theme === 'light' ? '#ffffff' : '#121214',
+    theme === 'light' ? '#fffbff' : '#141318',
   );
 }
 

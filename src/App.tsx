@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { Component, useEffect, useState, type ReactNode } from 'react';
 import { NavProvider, useNav } from './lib/nav';
 import {
   applyTheme,
@@ -15,6 +15,13 @@ import MangaDetailsPage from './pages/MangaDetailsPage';
 import ReaderPage from './pages/ReaderPage';
 import SettingsPage from './pages/SettingsPage';
 import ExtensionsPage from './pages/ExtensionsPage';
+import BackupPage from './pages/BackupPage';
+import DownloadsPage from './pages/DownloadsPage';
+import CategoriesPage from './pages/CategoriesPage';
+import ConnectionsPage from './pages/ConnectionsPage';
+import MigrationPage from './pages/MigrationPage';
+import { PwaStatus, QueueBar } from './components/PwaStatus';
+import { Toast } from './components/Feedback';
 import './index.css';
 
 const tabPages = {
@@ -45,15 +52,29 @@ function Shell() {
   if (route.name === 'extensions') {
     return <ExtensionsPage />;
   }
+  if (route.name === 'downloads') return <DownloadsPage />;
+  if (route.name === 'backup') return <BackupPage />;
+  if (route.name === 'categories') return <CategoriesPage />;
+  if (route.name === 'connections') return <ConnectionsPage />;
+  if (route.name === 'migrate') return <MigrationPage mangaKey={route.mangaKey} />;
 
   const ActiveTabPage = tabPages[tab];
 
   return (
     <>
       <ActiveTabPage />
+      <QueueBar />
       <TabBar />
     </>
   );
+}
+
+class AppBoundary extends Component<{ children: ReactNode }, { failed: boolean }> {
+  state = { failed: false };
+  static getDerivedStateFromError() { return { failed: true }; }
+  render() {
+    return this.state.failed ? <div className="reader-fallback"><h2>Unable to open this screen</h2><p>Your saved library has not been cleared.</p><button className="btn" onClick={() => { location.hash = '#/library'; location.reload(); }}>Return to library</button></div> : this.props.children;
+  }
 }
 
 export default function App() {
@@ -68,7 +89,8 @@ export default function App() {
   return (
     <NavProvider>
       <div className="app">
-        <Shell />
+        <AppBoundary><PwaStatus /><Shell /></AppBoundary>
+        <Toast />
       </div>
     </NavProvider>
   );
