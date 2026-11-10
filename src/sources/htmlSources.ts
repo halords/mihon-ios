@@ -10,7 +10,7 @@ function info(document: Document, label: string): string {
 }
 function parseCards(config: BackupSourceConfig, document: Document, selector: string, base: string, absoluteIds = false): SManga[] {
   const result = [...document.querySelectorAll(selector)].flatMap(element => {
-    const link = element.querySelector<HTMLAnchorElement>('h3 a, h2 a, .item-title a, a[title], a');
+    const link = element.querySelector<HTMLAnchorElement>('h3 a, h2 a, .item-title a') ?? element.querySelector<HTMLAnchorElement>('a[title]') ?? element.querySelector<HTMLAnchorElement>('a');
     if (!link?.getAttribute('href')) return [];
     const url = new URL(link.getAttribute('href')!, base);
     const title = link.getAttribute('title') || text(link) || element.querySelector('img')?.getAttribute('alt') || '';
@@ -67,6 +67,11 @@ export const manhwa18LegacySource = wordpressSource('4841602236575491202', true)
 export const kissmangaSource = wordpressSource('3112384885023225761', false);
 
 const box = backupSourceConfig('2528986671771677900');
+// MangaBox uses the website's change_alias search format.
+export function normalizeBoxSearch(query: string): string {
+  return query.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replaceAll('đ', 'd')
+    .replace(/[!@%^*()+=<>?/,.:;'\s"&#[\]~$_-]+/g, '_').replace(/^_+|_+$/g, '');
+}
 async function boxSlug(id: string): Promise<string> {
   const part = new URL(id, box.baseUrl).pathname.split('/').filter(Boolean).at(-1) ?? '';
   if (/^manga-[a-z]{2}\d+$/.test(part) || /^[a-z]{2}\d+$/.test(part)) {
@@ -87,7 +92,7 @@ export const mangakakalotSource: Source = {
   ...box, kind: 'builtin', lang: 'en', supportsLatest: true,
   async getPopularManga(page) { const url = `${box.baseUrl}/manga-list/hot-manga?page=${page}`; return parseCards(box, await sourceDocument(box, url), '.list-truyen-item-wrap, .list-comic-item-wrap, .story_item', url, true); },
   async getLatestUpdates(page) { const url = `${box.baseUrl}/manga-list/latest-manga?page=${page}`; return parseCards(box, await sourceDocument(box, url), '.list-truyen-item-wrap, .list-comic-item-wrap, .story_item', url, true); },
-  async searchManga(search, page) { const url = `${box.baseUrl}/search/story/${encodeURIComponent(search.replaceAll(' ', '_'))}?page=${page}`; return parseCards(box, await sourceDocument(box, url), '.story_item, .list-truyen-item-wrap, .list-comic-item-wrap', url, true); },
+  async searchManga(search, page) { const query = normalizeBoxSearch(search); if (!query) return []; const url = `${box.baseUrl}/search/story/${encodeURIComponent(query)}?page=${page}`; return parseCards(box, await sourceDocument(box, url), '.story_item, .list-truyen-item-wrap, .list-comic-item-wrap', url, true); },
   async getMangaDetails(id) {
     const url = `${box.baseUrl}/manga/${await boxSlug(id)}`, document = await sourceDocument(box, url);
     const title = text(document.querySelector('.manga-info-top h1, .panel-story-info h1, .panel-story-info h2'));

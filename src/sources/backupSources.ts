@@ -9,11 +9,11 @@ export interface BackupSourceConfig {
 }
 export const backupSourceConfigs: BackupSourceConfig[] = [
   { id: '4758858684982406533', name: 'MangaHub', baseUrl: 'https://mangahub.io', hosts: ['mangahub.io', 'api.mghcdn.com'], imageHosts: ['mghcdn.com'] },
-  { id: '2528986671771677900', name: 'Mangakakalot', baseUrl: 'https://www.kakamanga.com', hosts: ['kakamanga.com', 'mangakakalove.com', 'mangakakalot.com', 'manganato.com', 'manganato.to', 'chapmanganato.to'], imageHosts: ['kakamanga.com', 'mangakakalove.com', 'mangakakalot.com', 'mkklcdnv6temp.com', 'mkklcdnv8.com', 'mkklcdnv9.com', 'readkakalot.com', '2xstorage.com', 'waitst.com'] },
+  { id: '2528986671771677900', name: 'Mangakakalot', baseUrl: 'https://www.mangakakalove.com', hosts: ['kakamanga.com', 'mangakakalove.com', 'mangakakalot.com', 'manganato.com', 'manganato.to', 'chapmanganato.to'], imageHosts: ['kakamanga.com', 'mangakakalove.com', 'mangakakalot.com', 'mkklcdnv6temp.com', 'mkklcdnv8.com', 'mkklcdnv9.com', 'readkakalot.com', '2xstorage.com', 'waitst.com'] },
   { id: '993336618407081332', name: 'Manhwa18.cc', baseUrl: 'https://manhwa18.cc', hosts: ['manhwa18.cc'], imageHosts: ['manhwa18.cc'] },
   { id: '4841602236575491202', name: 'Manhwa18.cc (legacy)', baseUrl: 'https://manhwa18.cc', hosts: ['manhwa18.cc'], imageHosts: ['manhwa18.cc'] },
   { id: '6247824327199706550', name: 'Asura Scans', baseUrl: 'https://asurascans.com', hosts: ['asurascans.com', 'asuracomic.net', 'asuratoon.com'], imageHosts: ['asurascans.com', 'asuracomic.net', 'asuratoon.com'] },
-  { id: '7798162483793432927', name: 'MangaLife', baseUrl: 'https://mangalife.us', hosts: ['mangalife.us'], imageHosts: ['mangalife.us', 'manga4life.com', 'mangasee123.com', 'planeptune.us', 'nep.li'] },
+  { id: '7798162483793432927', name: 'MangaLife', baseUrl: 'https://manga4life.com', hosts: ['manga4life.com', 'mangalife.us'], imageHosts: ['mangalife.us', 'manga4life.com', 'mangasee123.com', 'planeptune.us', 'nep.li'] },
   { id: '6484561431658238800', name: 'MangaFox', baseUrl: 'https://fanfox.net', hosts: ['fanfox.net'], imageHosts: ['fanfox.net', 'dmcdn.net', 'dm5.com', 'mfcdn.net', 'mangafox.me'] },
   { id: '3112384885023225761', name: 'Kissmanga.in', baseUrl: 'https://kissmanga.in', hosts: ['kissmanga.in'], imageHosts: ['kissmanga.in'] },
 ];

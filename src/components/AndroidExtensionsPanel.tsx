@@ -5,6 +5,7 @@ import { useNav } from '../lib/nav';
 import { getDB } from '../lib/db';
 import { addServerExtensionStore, getServerExtensions, getServerExtensionStores, refreshServerExtensions, removeServerExtensionStore, updateServerExtension } from '../lib/serverExtensions';
 import Icon from './Icon';
+import SourceLogo from './SourceLogo';
 import { EmptyState } from './Feedback';
 
 export default function AndroidExtensionsPanel() {
@@ -61,7 +62,7 @@ export default function AndroidExtensionsPanel() {
       <div className="browse-toolbar"><select aria-label="Extension language" value={lang} onChange={e => setLang(e.target.value)}><option value="all">All languages</option>{[...new Set(extensions.map(e => e.lang))].sort().map(language => <option key={language} value={language}>{language.toUpperCase()}</option>)}</select><select aria-label="Extension status" value={status} onChange={e => setStatus(e.target.value as typeof status)}><option value="all">All extensions</option><option value="installed">Installed</option><option value="available">Available</option><option value="updates">Updates</option></select></div>
       {loading && <div className="spinner" role="status" aria-label="Loading extension catalog" />}
       {visible.map(extension => <article className="extension-row" key={extension.pkgName} aria-label={`${extension.name} ${extension.lang.toUpperCase()} extension`}>
-        <div className="extension-avatar"><Icon name="browse" /></div><div className="extension-info"><strong>{extension.name}</strong><small>{extension.lang.toUpperCase()} · v{extension.versionName}{extension.isNsfw ? ' · 18+' : ''}{extension.isObsolete ? ' · Unavailable' : ''}</small><small>{stores.find(s => s.indexUrl === extension.storeIndexUrl)?.name ?? extension.storeIndexUrl ?? 'Manually installed'}</small></div>
+        <SourceLogo id={extension.pkgName} name={extension.name} /><div className="extension-info"><strong>{extension.name}</strong><small>{extension.lang.toUpperCase()} · v{extension.versionName}{extension.isNsfw ? ' · 18+' : ''}{extension.isObsolete ? ' · Unavailable' : ''}</small><small>{stores.find(s => s.indexUrl === extension.storeIndexUrl)?.name ?? extension.storeIndexUrl ?? 'Manually installed'}</small></div>
         <div className="extension-actions">{extension.isInstalled ? <>{extension.hasUpdate && !extension.isObsolete && <button className="btn-ghost outlined" disabled={disabled} onClick={() => void run(extension.pkgName, () => updateServerExtension(extension, 'update', connection.url), `Updated ${extension.name}.`)}>Update</button>}<button className="text-btn danger" disabled={disabled} onClick={() => {
           if (window.confirm(`Uninstall ${extension.name} from your server? Your library, progress and downloaded chapters are kept.`)) void run(extension.pkgName, () => updateServerExtension(extension, 'uninstall', connection.url), `Uninstalled ${extension.name}.`);
         }}>Uninstall</button></> : <button className="btn-ghost outlined" disabled={disabled || extension.isObsolete} onClick={() => void run(extension.pkgName, () => updateServerExtension(extension, 'install', connection.url), `Installed ${extension.name}. Its sources are now in Browse.`)}>{busy === extension.pkgName ? 'Installing…' : 'Install'}</button>}</div>

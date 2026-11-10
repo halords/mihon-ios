@@ -7,6 +7,8 @@ import { useNav } from '../lib/nav';
 import { getSource } from '../sources';
 import { formatBytes } from '../lib/files';
 import Icon from '../components/Icon';
+import SourceLogo from '../components/SourceLogo';
+import BrowserSourcesPanel from '../components/BrowserSourcesPanel';
 
 export default function ConnectionsPage() {
   const nav = useNav();
@@ -37,7 +39,8 @@ export default function ConnectionsPage() {
     finally { setBusy(false); }
   }
   return <main className="screen settings-screen"><header className="topbar"><button className="icon-btn" aria-label="Back" onClick={nav.back}><Icon name="back" /></button><h1>Connections</h1></header>
-    <div className="page-intro"><h2>Your Android sources, on iOS.</h2><p>Connect your own Suwayomi server to run Mihon-compatible extensions. Chapters you download stay readable on this device without the server.</p></div>
+    <div className="page-intro"><h2>Your sources, on iOS.</h2><p>Your backup sources are built in. Use browser verification for websites that require a browser session, or connect Suwayomi for Android extensions.</p></div>
+    <BrowserSourcesPanel />
     {error && <div className="error" role="alert">{error}</div>}{message && <p className="status-message" role="status">{message}</p>}
     <section className="settings-card"><div className="card-heading"><Icon name="cloud" /><h3>Suwayomi server</h3><span className={`chip ${connection.status === 'connected' ? 'success-chip' : ''}`}>{connection.status === 'connected' ? 'Connected' : connection.status === 'connecting' ? 'Connecting' : connection.status === 'offline' ? 'Offline' : 'Disconnected'}</span></div>
       <label className="field-label">Server URL<input type="url" aria-label="Suwayomi server URL" autoCapitalize="none" autoCorrect="off" placeholder="https://suwayomi.example.com" value={url} onChange={e => setUrl(e.target.value)} /></label>
@@ -54,8 +57,8 @@ export default function ConnectionsPage() {
       setBusy(true); setError(''); setMessage('Sending backup to your server…');
       void sendBackupToServer(archive, setMessage).then(() => { setMessage('Server library restored. Android sources can now resolve your titles.'); reload(); }).catch(error => { setError(error instanceof Error ? error.message : 'Server restore failed'); setMessage(''); }).finally(() => setBusy(false));
     }}>Copy to server</button></div>)}</section>}
-    {!!data?.imported.length && <section className="settings-card"><h3>Sources used by your library</h3>{data.imported.map(source => <div className="source-review-row" key={source.id}><div><strong>{source.name}</strong><small>{source.count} titles</small></div><span className={`chip ${getSource(source.id) || source.id === 'local' ? 'success-chip' : ''}`}>{source.id === 'local' ? 'On device' : source.id === '0' ? 'Import CBZ files' : getSource(source.id) ? 'Available' : 'Needs extension'}</span></div>)}</section>}
-    {!!connection.sources.length && <section className="settings-card"><h3>Connected Android sources · {connection.sources.length}</h3><div className="searchbar"><Icon name="search" /><input type="search" aria-label="Filter connected sources" placeholder="Find a source" value={query} onChange={e => setQuery(e.target.value)} /></div>{connection.sources.filter(s => `${s.name} ${s.lang}`.toLowerCase().includes(query.toLowerCase())).map(source => <div className="source-review-row" key={source.id}><div><strong>{source.name}</strong><small>{source.lang.toUpperCase()} · {source.id}</small></div><Icon name="check" size={18} /></div>)}</section>}
+    {!!data?.imported.length && <section className="settings-card"><h3>Sources used by your library</h3>{data.imported.map(source => <div className="source-review-row" key={source.id}><SourceLogo id={source.id} name={source.name} /><div><strong>{source.name}</strong><small>{source.count} titles</small></div><span className={`chip ${getSource(source.id) || source.id === 'local' ? 'success-chip' : ''}`}>{source.id === 'local' ? 'On device' : source.id === '0' ? 'Import CBZ files' : getSource(source.id) ? 'Available' : 'Needs extension'}</span></div>)}</section>}
+    {!!connection.sources.length && <section className="settings-card"><h3>Connected Android sources · {connection.sources.length}</h3><div className="searchbar"><Icon name="search" /><input type="search" aria-label="Filter connected sources" placeholder="Find a source" value={query} onChange={e => setQuery(e.target.value)} /></div>{connection.sources.filter(s => `${s.name} ${s.lang}`.toLowerCase().includes(query.toLowerCase())).map(source => <div className="source-review-row" key={source.id}><SourceLogo id={source.id} name={source.name} /><div><strong>{source.name}</strong><small>{source.lang.toUpperCase()} · {source.id}</small></div><Icon name="check" size={18} /></div>)}</section>}
     <section className="settings-card"><h3>Connect your Mihon sources</h3><ol><li>Start Suwayomi on your computer or server and connect here.</li><li>Open Browse → Extensions, add your retained Mihon stores, and install matching sources.</li><li>Copy your retained Mihon backup to the server.</li><li>Open a title and download its chapters for offline reading.</li></ol><a className="text-btn" href="/help/suwayomi.html" target="_blank" rel="noopener noreferrer">Server setup instructions <Icon name="arrow" size={16} /></a></section>
     <section className="settings-card"><h3>Web extensions</h3><p className="muted">Browser source adapters can also be installed from web extension indexes.</p><button className="text-btn" onClick={nav.openExtensions}>Manage web extensions <Icon name="arrow" size={16} /></button></section>
   </main>;

@@ -1,0 +1,41 @@
+services:
+  app:
+    build: .
+    init: true
+    restart: unless-stopped
+    environment:
+      PORT: "4173"
+      SOURCE_BROWSER_URL: http://browser:4190
+      SOURCE_BROWSER_TOKEN: "${SOURCE_BROWSER_TOKEN:?Set SOURCE_BROWSER_TOKEN in .env}"
+    ports:
+      - "127.0.0.1:4173:4173"
+  browser:
+    build:
+      context: .
+      dockerfile: browser-server/Dockerfile
+    init: true
+    restart: unless-stopped
+    security_opt:
+      - seccomp=./browser-server/seccomp_profile.json
+    environment:
+      SOURCE_BROWSER_TOKEN: "${SOURCE_BROWSER_TOKEN:?Set SOURCE_BROWSER_TOKEN in .env}"
+    volumes:
+      - browser-state:/app/.browser-state
+  https:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    environment:
+      MIHON_DOMAIN: "${MIHON_DOMAIN:?Set MIHON_DOMAIN to your domain in .env}"
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - app
+volumes:
+  browser-state:
+  caddy-data:
+  caddy-config:

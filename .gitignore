@@ -6,6 +6,7 @@ test-results/
 playwright-report/
 .env
 .env.local
+.browser-state/
 *.tachibk
 *.cbz
 *.mihon.zip

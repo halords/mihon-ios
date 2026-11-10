@@ -11,6 +11,7 @@ import { deleteMangaDownloads, deleteChapterDownload } from '../lib/downloads';
 import DownloadButton from '../components/DownloadButton';
 import Cover from '../components/Cover';
 import Icon from '../components/Icon';
+import SourceLogo from '../components/SourceLogo';
 import Sheet from '../components/Sheet';
 import { EmptyState, toast } from '../components/Feedback';
 import type { ParsedTracking } from '../backup/models';
@@ -74,7 +75,7 @@ export default function MangaDetailsPage({ mangaKey }: { mangaKey: string }) {
   const actionKeys = selected.size ? [...selected] : activeChapter ? [activeChapter.id] : [];
   const website = sourceId === 'mangadex' ? `https://mangadex.org/title/${mangaId}` : /^https?:\/\//.test(manga.url ?? mangaId) ? manga.url ?? mangaId : getSource(sourceId)?.baseUrl ? new URL(manga.url ?? mangaId, getSource(sourceId)!.baseUrl).href : undefined;
   return <main className="screen details-screen">{header}
-    <div className="manga-hero"><Cover url={manga.coverUrl} title={manga.title} /><div><h2>{manga.title}</h2><p>{[...new Set([manga.author, manga.artist].filter(Boolean))].join(' · ')}</p><div className="manga-status"><span className="status-dot" />{manga.status}</div><span className="manga-source">{sourceName}</span></div></div>
+    <div className="manga-hero"><Cover url={manga.coverUrl} title={manga.title} /><div><h2>{manga.title}</h2><p>{[...new Set([manga.author, manga.artist].filter(Boolean))].join(' · ')}</p><div className="manga-status"><span className="status-dot" />{manga.status}</div><span className="manga-source source-caption"><SourceLogo id={sourceId} name={sourceName} iconUrl={getSource(sourceId)?.iconUrl} />{sourceName}</span></div></div>
     <div className="detail-actions">
       <button className={`detail-action ${entry ? 'accent' : ''}`} disabled={busy} onClick={() => {
         if (entry) { setCategoryDraft(libraryCategories(entry)); setSheet('categories'); }
@@ -87,7 +88,7 @@ export default function MangaDetailsPage({ mangaKey }: { mangaKey: string }) {
     {readable.length > 0 && <button className="btn read-button" disabled={!canRead} onClick={() => target && nav.openReader(mangaKey, target.id)}><Icon name="play" size={19} filled /><span>{canRead ? readLabel : online ? 'Connect a source to read' : 'No downloaded chapters'}<small>{target?.name}{latest && target ? ` · Page ${(stateByKey[chapterKey(sourceId, mangaId, target.id)]?.lastPage ?? 0) + 1}` : ''}</small></span></button>}
     {!!downloaded.length && <div className="inline-note"><Icon name="check" size={16} />{downloaded.length} chapters available offline<button className="text-btn" onClick={nav.openDownloads}>Manage</button></div>}
     {!sourceAvailable && sourceId !== 'local' && <div className="source-notice"><Icon name="cloud" /><div><strong>{sourceId === '0' ? 'Local files need to be copied separately' : 'Your library is restored. Connect this source to read.'}</strong><p>{sourceId === '0' ? 'A Mihon backup contains progress and metadata. Import your chapter CBZ files to read offline.' : 'Connect Suwayomi to use the Android extension, or migrate to another available source.'}</p><button className="text-btn" onClick={nav.openConnections}>Connect source <Icon name="arrow" size={16} /></button></div></div>}
-    {(notice || data.networkError) && <div className="inline-error" role="alert">{notice || data.networkError} Saved chapters are still available.</div>}
+    {(notice || data.networkError) && <div className="inline-error" role="alert">{notice || data.networkError} Saved chapters are still available.{getSource(sourceId)?.kind === "builtin" && sourceId !== "mangadex" && <a className="text-btn" href={"#/connections?source=" + sourceId}>Browser verification</a>}</div>}
     {manga.description && <div className="description"><p className={expanded ? '' : 'clamped'}>{manga.description}</p><button className="text-btn" aria-expanded={expanded} onClick={() => setExpanded(!expanded)}>{expanded ? 'Show less' : 'Read more'}</button></div>}
     {!!manga.genres.length && <div className="genre-tags">{manga.genres.map(genre => <span className="chip" key={genre}>{genre}</span>)}</div>}
     <details className="notes-section"><summary>Notes{notes ? ' · saved' : ''}</summary><textarea aria-label="Manga notes" placeholder="Your notes about this title" value={notes} onChange={e => setNotes(e.target.value)} onBlur={() => void patchManga(mangaKey, { notes }).catch(error => toast(String(error)))} /></details>
@@ -100,9 +101,9 @@ export default function MangaDetailsPage({ mangaKey }: { mangaKey: string }) {
         return <div className={`chapter-row ${state?.read ? 'is-read' : ''} ${selected.has(chapter.id) ? 'selected' : ''}`} key={key}>
           <input type="checkbox" className="chapter-checkbox" aria-label={`Select ${chapter.name}`} checked={selected.has(chapter.id)} onChange={e => setSelected(old => { const next = new Set(old); if (e.target.checked) next.add(chapter.id); else next.delete(chapter.id); return next; })} />
           <button className="chapter-open" disabled={!chapter.external && !state?.downloaded && !(sourceAvailable && online)} onClick={() => {
-            if (chapter.external) window.open(`https://mangadex.org/chapter/${chapter.id}`, '_blank', 'noopener,noreferrer');
+            if (chapter.external) window.open(chapter.externalUrl ?? (sourceId === 'mangadex' ? `https://mangadex.org/chapter/${chapter.id}` : new URL(chapter.url ?? chapter.id, getSource(sourceId)?.baseUrl).href), '_blank', 'noopener,noreferrer');
             else nav.openReader(mangaKey, chapter.id);
-          }}><span className="chapter-title">{state?.bookmark && <Icon name="bookmark" size={14} filled />}{chapter.name}</span><small>{chapter.dateUpload ? new Date(chapter.dateUpload).toLocaleDateString() : 'Imported'}{chapter.scanlator ? ` · ${chapter.scanlator}` : ''}{!state?.read && state?.lastPage ? ` · Page ${state.lastPage + 1}` : ''}{chapter.external ? ' · External' : ''}</small></button>
+          }}><span className="chapter-title">{state?.bookmark && <Icon name="bookmark" size={14} filled />}{chapter.name}</span><span className="chapter-reading-state">{state?.read ? <Icon name="check" size={12} /> : <span className="unread-dot" aria-hidden="true" />}{state?.read ? 'Read' : 'Unread'}</span><small>{chapter.dateUpload ? new Date(chapter.dateUpload).toLocaleDateString() : 'Imported'}{chapter.scanlator ? ` · ${chapter.scanlator}` : ''}{!state?.read && state?.lastPage ? ` · Page ${state.lastPage + 1}` : ''}{chapter.external ? ' · External' : ''}</small></button>
           {!chapter.external && (sourceAvailable || state?.downloaded) && <DownloadButton mangaKey={mangaKey} sourceId={sourceId} mangaId={mangaId} chapterId={chapter.id} downloaded={!!state?.downloaded} />}
           <button className="icon-btn" aria-label={`Options for ${chapter.name}`} onClick={() => { setActiveChapter(chapter); setSheet('chapter'); }}><Icon name="more" size={18} /></button>
         </div>;

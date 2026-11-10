@@ -1,4 +1,5 @@
 import { fetchWithTimeout } from '../lib/fetchJson';
+import { browserSourceEnabled } from '../lib/browserSources';
 import { getChapterMetas, getManga } from '../lib/db';
 import { allowedSourceUrl, type BackupSourceConfig } from './backupSources';
 import { mangaKey, type MangaPage, type MangaStatus, type SChapter, type SManga } from './Source';
@@ -6,16 +7,22 @@ import { mangaKey, type MangaPage, type MangaStatus, type SChapter, type SManga 
 export function sourceProxyUrl(config: BackupSourceConfig, input: string, image = false): string {
   const url = new URL(input, config.baseUrl);
   if (!allowedSourceUrl(config, url, image)) throw new Error(`${config.name} returned an unsupported ${image ? 'image' : 'website'} host: ${url.hostname}`);
-  return `/api/source?${new URLSearchParams({ source: config.id, url: url.href, ...(image ? { image: '1' } : {}) })}`;
+  return `/api/source?${new URLSearchParams({ source: config.id, url: url.href, ...(image ? { image: '1' } : {}), ...(browserSourceEnabled(config.id) ? { browser: '1' } : {}) })}`;
 }
 
-export async function sourceRequest(config: BackupSourceConfig, url: string, init: RequestInit = {}): Promise<Response> {
-  const response = await fetchWithTimeout(sourceProxyUrl(config, url), init);
+export class SourceRequestError extends Error {
+  readonly status: number;
+  constructor(message: string, status: number) { super(message); this.status = status; }
+}
+export interface SourceRequestInit extends RequestInit { refreshSession?: boolean }
+export async function sourceRequest(config: BackupSourceConfig, url: string, init: SourceRequestInit = {}): Promise<Response> {
+  const { refreshSession, ...request } = init;
+  const response = await fetchWithTimeout(sourceProxyUrl(config, url) + (refreshSession ? '&refresh=1' : ''), request);
   if (!response.ok) {
     const body = await response.text();
     let message: string | undefined;
     try { message = (JSON.parse(body) as { error?: string }).error; } catch { /* upstream HTML */ }
-    throw new Error(message ?? (response.status === 403 ? `${config.name} is blocking app requests. Try again later or open the source website.` : `${config.name} request failed (HTTP ${response.status}).`));
+    throw new SourceRequestError(message ?? (response.status === 403 ? `${config.name} is blocking app requests. Try again later or open the source website.` : `${config.name} request failed (HTTP ${response.status}).`), response.status);
   }
   return response;
 }
@@ -28,7 +35,7 @@ export async function sourceJson<T>(config: BackupSourceConfig, url: string, ini
 
 const documents = new Map<string, { at: number; pending: Promise<Document> }>();
 export function sourceDocument(config: BackupSourceConfig, url: string, init?: RequestInit): Promise<Document> {
-  const key = config.id + ':' + url;
+  const key = config.id + ':' + (browserSourceEnabled(config.id) ? 'browser:' : 'http:') + url;
   const hit = documents.get(key);
   if (!init?.signal && !init?.method && hit && Date.now() - hit.at < 30000) return hit.pending;
   const pending = (async () => {

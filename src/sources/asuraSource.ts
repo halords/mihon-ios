@@ -74,7 +74,7 @@ export const asuraSource: Source = {
     const chapters: SChapter[] = (data.chapters ?? []).map((chapter, index) => {
       const url = `/series/${identity.seriesSlug}/chapter/${chapter.number}`;
       const locked = chapter.is_premium || chapter.is_locked || Date.parse(chapter.early_access_until ?? '') > Date.now();
-      return { id: url, url, mangaId: id, name: `Chapter ${chapter.number}${chapter.title ? ' - ' + chapter.title : ''}${locked ? ' (subscription required)' : ''}`, number: chapter.number, dateUpload: Date.parse(chapter.created_at ?? '') || 0, sourceOrder: index, ...(locked ? { external: true } : {}) };
+      return { id: url, url, mangaId: id, name: `Chapter ${chapter.number}${chapter.title ? ' - ' + chapter.title : ''}${locked ? ' (subscription required)' : ''}`, number: chapter.number, dateUpload: Date.parse(chapter.created_at ?? '') || 0, sourceOrder: index, ...(locked ? { external: true, externalUrl: absolute(identity.publicUrl, config.baseUrl) + '/chapter/' + chapter.number } : {}) };
     });
     return retainChapterIds(config, id, requireItems(config, chapters, 'chapters'));
   },

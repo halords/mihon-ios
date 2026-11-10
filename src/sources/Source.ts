@@ -21,6 +21,7 @@ export interface SChapter {
   number: number;
   dateUpload: number; // epoch ms
   external?: boolean; // hosted outside the source API; not readable in-app
+  externalUrl?: string;
   url?: string;
   scanlator?: string;
   dateFetch?: number;
@@ -43,6 +44,7 @@ export interface Source {
   kind?: 'builtin' | 'extension' | 'suwayomi';
   supportsLatest?: boolean;
   baseUrl?: string;
+  iconUrl?: string;
   getPopularManga(page: number): Promise<SManga[]>;
   getLatestUpdates(page: number): Promise<SManga[]>;
   searchManga(query: string, page: number): Promise<SManga[]>;

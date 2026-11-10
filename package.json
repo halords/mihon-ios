@@ -9,6 +9,7 @@
     "lint": "oxlint",
     "preview": "vite preview",
     "start": "node --env-file-if-exists=.env server/index.mjs",
+    "start:browser": "node --env-file-if-exists=.env browser-server/index.mjs",
     "test": "vitest run",
     "test:e2e": "playwright test",
     "test:server": "vitest run --config vitest.server.config.ts"
@@ -16,6 +17,7 @@
   "dependencies": {
     "fflate": "^0.8.3",
     "idb": "^8.0.4",
+    "playwright": "^1.65.0",
     "react": "^19.3.1",
     "react-dom": "^19.3.1"
   },

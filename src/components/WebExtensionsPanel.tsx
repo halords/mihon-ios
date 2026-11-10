@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { loadSettings, saveSettings } from '../lib/settings';
+import SourceLogo from './SourceLogo';
 import { getInstalledPlugins, type InstalledPluginRecord } from '../lib/db';
 import {
   fetchExtensionIndex,
@@ -166,6 +167,7 @@ export default function WebExtensionsPanel() {
             const error = pluginErrors.get(plugin.id);
             return (
               <div key={plugin.id} style={rowStyle}>
+                <SourceLogo id={plugin.id} name={plugin.name} />
                 <div>
                   <div>{plugin.name}</div>
                   <div style={{ opacity: 0.7, fontSize: 13 }}>
@@ -234,6 +236,7 @@ export default function WebExtensionsPanel() {
               const update = isUpdateAvailable(manifest, record);
               return (
                 <div key={manifest.id} style={rowStyle}>
+                  <SourceLogo id={manifest.id} name={manifest.name} />
                   <div>
                     <div>{manifest.name}</div>
                     <div style={{ opacity: 0.7, fontSize: 13 }}>

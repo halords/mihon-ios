@@ -1,4 +1,7 @@
 import { test, expect, type Page } from '@playwright/test';
+import { readFile } from 'node:fs/promises';
+import { gunzipIfNeeded } from '../../src/backup/compression';
+import { parseTachibk } from '../../src/backup/parser';
 // WebKit's service worker can bypass network route fixtures. Online adapter
 // tests use direct requests; the separate offline test retains the worker.
 test.use({ serviceWorkers: 'block' });
@@ -91,10 +94,90 @@ test('shows only backup sources by default and explains a source access block', 
   await fixtureRequests(page, true);
   await page.goto('/#/browse');
   await expect(page.locator('.source-browse-row')).toHaveCount(9);
+  await expect.poll(() => page.locator('.source-browse-row .source-logo img').evaluateAll(images => images.filter(image => (image as HTMLImageElement).naturalWidth > 0).length)).toBe(9);
   await expect(page.getByRole('button', { name: /Browse.*Demo/ })).toHaveCount(0);
   await page.getByRole('button', { name: 'Browse Kissmanga.in EN', exact: true }).click();
   await expect(page.getByRole('alert')).toContainText('blocking app requests');
   await expect(page.getByRole('link', { name: 'Open source website', exact: true })).toHaveAttribute('href','https://kissmanga.in');
+});
+async function seedMigration(page: Page) {
+  await page.goto('/#/browse');
+  await expect(page.locator('.source-browse-row')).toHaveCount(9);
+  const key = '4758858684982406533::/manga/old-fixture';
+  await page.evaluate(async key => {
+    const db = await new Promise<IDBDatabase>((resolve, reject) => { const request = indexedDB.open('mihon-pwa'); request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error); });
+    const tx = db.transaction(['manga', 'chapterMeta', 'chapterState', 'history', 'library'], 'readwrite');
+    tx.objectStore('manga').put({ key, manga: { id: '/manga/old-fixture', sourceId: '4758858684982406533', sourceName: 'MangaHub', title: 'Fixture Hero', description: '', genres: [], status: 'Ongoing', coverUrl: '' }, updatedAt: 1, sourceAvailable: true });
+    const chapterKey = key + '::/old-fixture/chapter-1.0';
+    tx.objectStore('chapterMeta').put({ key: chapterKey, mangaKey: key, chapter: { id: '/old-fixture/chapter-1.0', mangaId: '/manga/old-fixture', name: 'Chapter 1', number: 1, dateUpload: 0 } });
+    tx.objectStore('chapterState').put({ key: chapterKey, mangaKey: key, read: true, bookmark: true, lastPage: 7, downloaded: false, lastReadAt: 1794000000000 });
+    tx.objectStore('history').put({ key: chapterKey, mangaKey: key, mangaTitle: 'Fixture Hero', coverUrl: '', chapterName: 'Chapter 1', page: 7, updatedAt: 1794000000000, readDuration: 45000 });
+    tx.objectStore('library').put({ key, category: 'Reading', categories: ['Reading', 'On Hold'], addedAt: 100 });
+    await new Promise<void>((resolve, reject) => { tx.oncomplete = () => resolve(); tx.onerror = () => reject(tx.error); }); db.close();
+  }, key);
+  return key;
+}
+test('migrates MangaHub to Mangakakalot and retains progress, categories, history and Android identity', async ({ page }) => {
+  await fixtureRequests(page);
+  await page.context().route('**/api/proxy?*', route => route.fulfill({ status: 502, contentType: 'application/json', body: '{"error":"Fixture unavailable"}' }));
+  const original = await seedMigration(page);
+  await page.goto('/#/migrate?' + new URLSearchParams({ manga: original }));
+  await expect(page.getByLabel('Search replacement title')).toHaveValue('Fixture Hero');
+  await expect(page.getByLabel('Replacement source')).toHaveValue('6247824327199706550');
+  await page.getByLabel('Replacement source').selectOption('2528986671771677900');
+  await page.getByRole('button', { name: 'Open Fixture Hero', exact: true }).click();
+  await expect(page.getByText('1 chapters available · 1 / 1 chapters with progress matched')).toBeVisible();
+  await page.getByRole('button', { name: 'Migrate to this title', exact: true }).click();
+  await expect(page.locator('.manga-source')).toContainText('Mangakakalot');
+  const records = await page.evaluate(async () => {
+    const db = await new Promise<IDBDatabase>(resolve => { const request = indexedDB.open('mihon-pwa'); request.onsuccess = () => resolve(request.result); });
+    const get = (store: string) => new Promise<any[]>(resolve => { const request = db.transaction(store).objectStore(store).getAll(); request.onsuccess = () => resolve(request.result); });
+    const result = { library: await get('library'), states: await get('chapterState'), history: await get('history') }; db.close(); return result;
+  });
+  expect(records.library).toHaveLength(1);
+  expect(records.library[0]).toMatchObject({ categories: ['Reading', 'On Hold'], addedAt: 100 });
+  expect(records.states.find(state => state.mangaKey === records.library[0].key)).toMatchObject({ read: true, bookmark: true, lastPage: 7 });
+  expect(records.history.find(row => row.mangaKey === records.library[0].key)).toMatchObject({ page: 7, readDuration: 45000 });
+  await page.goto('/#/backup');
+  const pending = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Export for Mihon Android (.tachibk)', exact: true }).click();
+  const exported = parseTachibk(await gunzipIfNeeded(new Uint8Array(await readFile((await (await pending).path())!))));
+  expect(exported.manga.find(manga => manga.favorite)).toMatchObject({ source: 2528986671771677900n, url: 'https://www.kakamanga.com/manga/fixture' });
+  expect(exported.manga.find(manga => manga.favorite)?.chapters[0]).toMatchObject({ read: true, bookmark: true, lastPageRead: 7 });
+});
+test('migrates a MangaHub title to the default Asura source after chapter review', async ({ page }) => {
+  await fixtureRequests(page);
+  const original = await seedMigration(page);
+  await page.goto('/#/migrate?' + new URLSearchParams({ manga: original }));
+  await expect(page.getByLabel('Replacement source')).toHaveValue('6247824327199706550');
+  await page.getByRole('button', { name: 'Open Fixture Hero', exact: true }).click();
+  await expect(page.locator('.migration-review')).toContainText('Asura Scans');
+  await expect(page.getByText('1 chapters available · 1 / 1 chapters with progress matched')).toBeVisible();
+  await page.getByRole('button', { name: 'Migrate to this title', exact: true }).click();
+  await expect(page.locator('.manga-source')).toContainText('Asura Scans');
+  await expect(page.locator('.chapter-row.is-read .chapter-reading-state')).toHaveText('Read');
+});
+test('discards an old replacement search when the user changes sources', async ({ page }) => {
+  await fixtureRequests(page);
+  let release!: () => void;
+  let started!: () => void;
+  const requested = new Promise<void>(resolve => { started = resolve; });
+  const held = new Promise<void>(resolve => { release = resolve; });
+  await page.context().route('**/api/proxy?*', async route => { started(); await held; await route.fulfill({ status: 502, contentType: 'application/json', body: '{"error":"Delayed old source error"}' }); });
+  const original = await seedMigration(page);
+  await page.goto('/#/migrate?' + new URLSearchParams({ manga: original }));
+  await page.getByLabel('Replacement source').selectOption('mangadex');
+  await requested;
+  await page.getByLabel('Replacement source').selectOption('2528986671771677900');
+  await expect(page.getByRole('button', { name: 'Open Fixture Hero', exact: true })).toBeVisible();
+  release();
+  await expect(page.getByRole('alert')).toHaveCount(0);
+  await page.getByRole('button', { name: 'Open Fixture Hero', exact: true }).click();
+  await expect(page.locator('.migration-review')).toContainText('Mangakakalot');
+  await page.getByLabel('Replacement source').selectOption('4758858684982406533');
+  await expect(page.locator('.migration-review')).toHaveCount(0);
+  await page.getByRole('button', { name: 'Open Fixture Hero', exact: true }).click();
+  await expect(page.locator('.migration-review')).toContainText('MangaHub');
 });
 test.describe('built-in offline reading', () => {
 test.use({ serviceWorkers: 'allow' });

@@ -6,6 +6,7 @@ import { useNav } from '../lib/nav';
 import { importCbz } from '../lib/localFiles';
 import { formatBytes, saveFile } from '../lib/files';
 import Icon from '../components/Icon';
+import SourceLogo from '../components/SourceLogo';
 import { toast } from '../components/Feedback';
 import { initPlugins } from '../lib/plugins';
 import { initSuwayomi } from '../lib/suwayomi';
@@ -84,7 +85,7 @@ export default function BackupPage() {
     </section>
     {preview && <section className="settings-card backup-review"><div className="card-heading"><Icon name="check" /><h3>Review Mihon backup</h3></div><p className="filename">{preview.name} · {formatBytes(preview.file.size)}</p>
       <div className="backup-stats">{[[preview.libraryCount, 'Library titles'], [preview.chapterCount, 'Chapters'], [preview.readCount, 'Read chapters'], [preview.bookmarkCount, 'Bookmarks'], [preview.backup.categories.length, 'Categories'], [preview.historyCount, 'History entries']].map(([value, label]) => <div key={label}><strong>{value}</strong><span>{label}</span></div>)}</div>
-      <h4>Sources in this backup</h4>{preview.sources.map(source => <div className="source-review-row" key={source.id}><div><strong>{source.name}</strong><small>{source.mangaCount} titles</small></div><span className={`chip ${source.available ? 'success-chip' : ''}`}>{source.available ? 'Ready' : 'Connect after restore'}</span></div>)}
+      <h4>Sources in this backup</h4>{preview.sources.map(source => <div className="source-review-row" key={source.id}><SourceLogo id={source.id} name={source.name} /><div><strong>{source.name}</strong><small>{source.mangaCount} titles</small></div><span className={`chip ${source.available ? 'success-chip' : ''}`}>{source.available ? 'Ready' : 'Connect after restore'}</span></div>)}
       <label className="form-row">Restore reader and library sorting preferences<input type="checkbox" checked={preferences} onChange={e => setPreferences(e.target.checked)} /></label>
       <p className="muted">All categories, bookmarks, progress, history, notes, tracking records, and Android preferences are retained. A copy of the original file stays on this device. Chapter images need to be downloaded or imported separately.</p>
       <button className="btn wide" disabled={busy} onClick={() => void restore()}>{busy ? 'Restoring…' : `Restore ${preview.libraryCount} library titles`}</button><button className="text-btn" disabled={busy} onClick={() => setPreview(null)}>Cancel</button>

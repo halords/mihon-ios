@@ -76,7 +76,7 @@ export default function LibraryPage() {
       filter === 'missing' && getSource(item.stored.manga.sourceId)) return false;
     return true;
   }).sort((a, b) => compareLibraryItems(a.sort, b.sort, settings));
-  const cards: MangaListItem[] = visible.map(item => ({ key: item.entry.key, manga: item.stored.manga, unread: item.unread, downloaded: item.downloaded,
+  const cards: MangaListItem[] = visible.map(item => ({ key: item.entry.key, manga: item.stored.manga, unread: item.unread, total: item.chapters.length, downloaded: item.downloaded,
     sourceMissing: !['local', '0'].includes(item.stored.manga.sourceId) && !getSource(item.stored.manga.sourceId), selected: selecting ? selected.has(item.entry.key) : undefined }));
   function toggle(key: string): void { setSelecting(true); setSelected(old => { const next = new Set(old); if (next.has(key)) next.delete(key); else next.add(key); return next; }); }
   function clearSelection(): void { setSelecting(false); setSelected(new Set()); }

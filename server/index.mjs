@@ -3,6 +3,7 @@ import { readFile, stat } from 'node:fs/promises';
 import { resolve, extname, sep } from 'node:path';
 import { handleMangaDexProxy, handleSuwayomiProxy, proxyError } from './proxy.ts';
 import { handleSourceProxy } from './sourceProxy.ts';
+import { handleBrowserSessionProxy } from './browserBridge.ts';
 
 const root = resolve('dist');
 const port = Number(process.env.PORT || 4173);
@@ -12,6 +13,7 @@ const server = createServer(async (req, res) => {
   try {
     if (req.url?.startsWith('/api/proxy?')) return await handleMangaDexProxy(req, res);
     if (req.url?.startsWith('/api/source?')) return await handleSourceProxy(req, res);
+    if (req.url?.startsWith('/api/source-browser?')) return await handleBrowserSessionProxy(req, res);
     if (req.url?.startsWith('/api/suwayomi/')) return await handleSuwayomiProxy(req, res);
     if (!['GET', 'HEAD'].includes(req.method ?? '')) { proxyError(res, 405, 'Method not allowed'); return; }
     const path = decodeURIComponent(new URL(req.url ?? '/', 'http://localhost').pathname);

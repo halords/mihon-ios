@@ -12,3 +12,4 @@ playwright-report
 *.log
 .prompts
 .lane-out
+.browser-state

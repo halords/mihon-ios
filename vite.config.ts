@@ -3,11 +3,13 @@ import react from '@vitejs/plugin-react';
 import { VitePWA } from 'vite-plugin-pwa';
 import { handleMangaDexProxy, handleSuwayomiProxy } from './server/proxy.ts';
 import { handleSourceProxy } from './server/sourceProxy.ts';
+import { handleBrowserSessionProxy } from './server/browserBridge.ts';
 
 function sourceProxy(): Plugin {
   const middleware = (req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse, next: (error?: unknown) => void): void => {
       if (req.url?.startsWith('/api/proxy?')) void handleMangaDexProxy(req, res).catch(next);
       else if (req.url?.startsWith('/api/source?')) void handleSourceProxy(req, res).catch(next);
+      else if (req.url?.startsWith('/api/source-browser?')) void handleBrowserSessionProxy(req, res).catch(next);
       else if (req.url?.startsWith('/api/suwayomi/')) void handleSuwayomiProxy(req, res).catch(next);
       else next();
     };
@@ -17,6 +19,7 @@ function sourceProxy(): Plugin {
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '');
   if (env.SUWAYOMI_URL && !process.env.SUWAYOMI_URL) process.env.SUWAYOMI_URL = env.SUWAYOMI_URL;
+  for (const name of ['SOURCE_BROWSER_URL', 'SOURCE_BROWSER_TOKEN']) if (env[name] && !process.env[name]) process.env[name] = env[name];
   return {
   plugins: [
     sourceProxy(),

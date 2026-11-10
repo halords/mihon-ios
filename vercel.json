@@ -2,6 +2,10 @@
   "framework": "vite",
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
+  "functions": {
+    "api/source.ts": { "maxDuration": 60 },
+    "api/source-browser.ts": { "maxDuration": 60 }
+  },
   "rewrites": [
     { "source": "/api/suwayomi/:path*", "destination": "/api/suwayomi?path=:path*" }
   ],

@@ -24,6 +24,8 @@ Open `http://localhost:4173`. Built-in sources need no `.env` or `SUWAYOMI_URL`.
 
 For the PWA, Suwayomi, and optional trusted HTTPS setup together, follow [docs/SUWAYOMI.md](docs/SUWAYOMI.md). There is also an offline setup guide at `/help/suwayomi.html`, linked from Connections.
 
+For sources that require website verification, an optional [browser backend](docs/BROWSER_BACKEND.md) lets you operate the source's server-side browser from the PWA and reuse its session. This requires a browser-capable host; it is not activated by default and cannot create a shared Safari website session on its own. The existing HTTP adapters, downloads and migration continue to work independently.
+
 ## Migrate from Mihon
 
 1. Export a `.tachibk` backup from Mihon and move it to your iPhone’s Files app.

@@ -32,8 +32,33 @@ it('forwards only read-only MangaHub queries and its scoped public access key', 
     const headers = check.upstream.mock.calls[0][1]!.headers as Headers;
     expect(headers.get('x-mhub-access')).toBe('a'.repeat(32));
     expect(headers.get('cookie')).toBe('mhub_access=' + 'a'.repeat(32));
+    expect(headers.get('origin')).toBe('https://mangahub.io');
     expect(headers.has('authorization')).toBe(false);
   } finally { await check.close(); }
+});
+it('reads MangaHub access cookies from the original page without following licensed-title redirects', async () => {
+  const check = await request({ source: '4758858684982406533', url: 'https://mangahub.io/chapter/hero/chapter-1?reloadKey=1', refresh: '1' });
+  check.upstream.mockResolvedValue(new Response(null, { status: 302, headers: { Location: 'https://other-site.example/licensed', 'Set-Cookie': 'mhub_access=valid.returned-key; Path=/; HttpOnly' } }));
+  try {
+    const response = await check.fetch();
+    expect(response.status).toBe(200);
+    expect(response.headers.get('x-mhub-access')).toBe('valid.returned-key');
+    expect(await response.json()).toEqual({ refreshed: true, upstreamStatus: 302 });
+    expect(check.upstream).toHaveBeenCalledOnce();
+    expect((check.upstream.mock.calls[0][1]!.headers as Headers).get('referer')).toBe('https://mangahub.io/manga/hero');
+  } finally { await check.close(); }
+});
+it('rejects session refreshes on other hosts, sources, images or routes', async () => {
+  for (const params of [
+    { source: '4758858684982406533', url: 'https://mangahub.io/login' },
+    { source: '4758858684982406533', url: 'https://api.mghcdn.com/graphql' },
+    { source: '2528986671771677900', url: 'https://www.mangakakalove.com/manga/hero' },
+    { source: '4758858684982406533', url: 'https://mangahub.io/manga/hero', image: '1' },
+  ]) {
+    const check = await request({ ...params, refresh: '1' });
+    try { expect((await check.fetch()).status).toBe(400); expect(check.upstream).not.toHaveBeenCalled(); }
+    finally { check.upstream.mockRestore(); await check.close(); }
+  }
 });
 it('rejects mutations and prevents redirects to unapproved domains', async () => {
   const mutation = await request({ source: '4758858684982406533', url: 'https://api.mghcdn.com/graphql' }, { method: 'POST', body: JSON.stringify({ query: 'mutation {changeUser}' }) });
