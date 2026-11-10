@@ -1,8 +1,8 @@
-# Built-in sources from the Mihon backup
+# Included manga sources
 
 Open **Browse → Sources** and choose a source. **Browse → Extensions → Built-in sources** lists the included adapters. They are available immediately, with no APK installation, Suwayomi connection, or backup upload to another server.
 
-The app includes exactly the source identities used by the supplied `.tachibk`. The two Manhwa18.cc IDs remain separate for compatibility. MangaDex imports map to the existing MangaDex adapter.
+The built-in list contains **Asura Scans, Mangakakalot, MangaFox and Manhwa18.cc**. The legacy Manhwa18.cc ID still resolves imported titles without a duplicate Browse row. Other original source IDs, logos and reading records remain in imports/exports and can be migrated to an included source. The table below retains prior adapter verification for reference; MangaHub, MangaDex, MangaLife and Kissmanga are no longer included in the default source list.
 
 | Source | Mihon source ID | Live check on 2026-11-10 |
 | --- | --- | --- |

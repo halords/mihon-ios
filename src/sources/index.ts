@@ -1,9 +1,8 @@
 import type { Source } from './Source';
-import { mangadexSource } from './mangadexSource';
-import { mangahubSource } from './mangahubSource';
 import { asuraSource } from './asuraSource';
-import { mangakakalotSource, manhwa18Source, manhwa18LegacySource, mangafoxSource, kissmangaSource } from './htmlSources';
-import { mangalifeSource } from './mangalifeSource';
+import { mangakakalotSource, manhwa18Source, manhwa18LegacySource, mangafoxSource } from './htmlSources';
+
+export const DEFAULT_SOURCE_ID = asuraSource.id;
 
 // Runtime source registry. Built-in sources register at module load;
 // extension plugins (src/lib/plugins.ts) register/unregister at runtime.
@@ -56,7 +55,8 @@ export function onSourcesChange(fn: () => void): () => void {
 
 export function getSource(id: string): Source | undefined {
   const layers = registry.get(id);
-  return layers?.get('extension') ?? layers?.get('suwayomi') ?? layers?.get('builtin') ?? (layers ? [...layers.values()].at(-1) : undefined);
+  return layers?.get('extension') ?? layers?.get('suwayomi') ?? layers?.get('builtin') ?? (layers ? [...layers.values()].at(-1) : undefined) ??
+    (id === manhwa18LegacySource.id ? manhwa18LegacySource : undefined);
 }
 
 export function requireSource(id: string): Source {
@@ -67,5 +67,6 @@ export function requireSource(id: string): Source {
   return source;
 }
 
-registerSource(mangadexSource, 'builtin');
-for (const source of [mangahubSource, mangakakalotSource, manhwa18Source, manhwa18LegacySource, asuraSource, mangalifeSource, mangafoxSource, kissmangaSource]) registerSource(source, 'builtin');
+// The legacy Manhwa18 identity resolves imported titles without duplicating
+// the source in Browse. Keep original identities in saved backups/history.
+for (const source of [asuraSource, mangakakalotSource, mangafoxSource, manhwa18Source]) registerSource(source, 'builtin');

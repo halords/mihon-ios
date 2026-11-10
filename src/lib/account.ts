@@ -1,6 +1,6 @@
 import { useSyncExternalStore } from 'react';
 import { unwrap } from 'idb';
-import { getDB, getRawDB, importData, dispatchDataEvent, type BackupData } from './db';
+import { getDB, getRawDB, importData, dispatchDataEvent, downloadRemovalKey, type BackupData } from './db';
 import { newer, PROFILE_STORES, validChange, type AccountUser, type DeviceProfile, type RemoteChange, type SyncRecord } from './syncTypes';
 import { observeSyncClock, setSyncProfileContext } from './syncStorage';
 import { DEFAULT_SETTINGS, libraryArrangement, onLibraryArrangementChange, saveSettings, type LibraryArrangement } from './settings';
@@ -22,8 +22,15 @@ let sessionVerified = false;
 let generation = 0;
 let channel: BroadcastChannel | undefined;
 let preferencesWrite = Promise.resolve();
-async function restoreLibraryArrangement(): Promise<void> {
-  const preferences = await (await getRawDB()).get('libraryPreferences', 'arrangement');
+async function restoreLibraryArrangement(preserveDevice = false): Promise<void> {
+  const db = await getRawDB();
+  const preferences = await db.get('libraryPreferences', 'arrangement');
+  if (preserveDevice && !await db.get('syncRecords', 'libraryPreferences\u0000arrangement')) {
+    // A pre-sync import may have restored its sort after the database upgrade
+    // seeded default preferences. Preserve that device choice at startup.
+    await db.put('libraryPreferences', { key: 'arrangement', ...libraryArrangement() });
+    return;
+  }
   saveSettings(preferences ? libraryArrangement(preferences) : libraryArrangement(DEFAULT_SETTINGS), { syncLibrary: false });
 }
 function saveLibraryArrangement(arrangement: LibraryArrangement): void {
@@ -87,15 +94,27 @@ export async function acknowledgeChanges(sent: SyncRecord[], userId: string): Pr
   await tx.done;
 }
 export async function applyRemoteChanges(changes: RemoteChange[], cursor: number, userId: string): Promise<void> {
+  // Persist a just-selected sort before comparing it with an in-flight pull.
+  await preferencesWrite;
   if (!Number.isSafeInteger(cursor) || cursor < 0 || changes.some(change => !validChange(change) || !Number.isSafeInteger(change.revision))) throw new Error('The server returned invalid sync data.');
   const db = await getRawDB(); const tx = db.transaction([...PROFILE_STORES, 'syncRecords', 'syncControl'] as const, 'readwrite');
   const owner = String((await tx.objectStore('syncControl').get('owner'))?.value ?? 'guest');
   if (owner !== userId) { tx.abort(); await tx.done.catch(() => {}); throw new SessionError('The active account changed.'); }
   let clock = Number((await tx.objectStore('syncControl').get('clock'))?.value ?? 0);
+  const removals = new Set<string>();
   for (const change of changes) {
     clock = Math.max(clock, change.clock);
     const local = await tx.objectStore('syncRecords').get(change.id);
     if (local && newer(local, change)) continue;
+    if (change.store === 'library') {
+      if (change.deleted) {
+        await tx.objectStore('metadata').put({ key: downloadRemovalKey(change.key), value: { pending: true } });
+        removals.add(change.key);
+      } else {
+        await tx.objectStore('metadata').delete(downloadRemovalKey(change.key));
+        removals.delete(change.key);
+      }
+    }
     if (change.deleted) await tx.objectStore(change.store).delete(change.key);
     else {
       let value = change.data!;
@@ -110,6 +129,7 @@ export async function applyRemoteChanges(changes: RemoteChange[], cursor: number
   await tx.objectStore('syncControl').put({ key: 'clock', value: clock });
   await tx.objectStore('syncControl').put({ key: 'cursor', value: cursor });
   await tx.done; observeSyncClock(clock);
+  for (const key of removals) await (await import('./libraryFiles')).purgeMangaFiles(key);
   if (changes.some(change => change.store === 'libraryPreferences')) await restoreLibraryArrangement();
   if (changes.length) dispatchDataEvent();
 }
@@ -264,7 +284,7 @@ export function initAccount(): Promise<void> {
     const db = await getRawDB();
     setSyncProfileContext(String((await db.get('syncControl', 'owner'))?.value ?? 'guest'));
     observeSyncClock(Number((await db.get('syncControl', 'clock'))?.value ?? 0));
-    await restoreLibraryArrangement();
+    await restoreLibraryArrangement(true);
     onLibraryArrangementChange(saveLibraryArrangement);
     try { const cached = JSON.parse(localStorage.getItem('mihon-account') ?? 'null'); if (cached?.id && cached?.email) publish({ user: cached }); } catch { /* First use. */ }
     if (typeof BroadcastChannel !== 'undefined') {

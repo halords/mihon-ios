@@ -33,7 +33,7 @@ test('restores last read sorting, changes direction, and persists it across a re
 test('shows available and missing library sources with stores retained from Android', async ({ page }, info) => {
   await restore(page);
   await page.goto('/#/browse');
-  await expect(page.getByRole('button', { name: /^Browse MangaDex/ })).toBeVisible();
+  await expect(page.getByRole('button', { name: /^Browse Asura Scans/ })).toBeVisible();
   await expect(page.getByText('Exact ID source', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Extensions', exact: true }).click();
   await page.getByRole('button', { name: 'Mihon extensions', exact: true }).click();

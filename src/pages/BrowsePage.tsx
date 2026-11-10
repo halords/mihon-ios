@@ -11,6 +11,7 @@ import { useNav } from '../lib/nav';
 import { mangaKey, type SManga, type Source } from '../sources/Source';
 import { ExtensionPanels } from './ExtensionsPage';
 import SourceLogo from '../components/SourceLogo';
+import { DEFAULT_SOURCE_ID } from '../sources';
 
 interface Group { id: string; name: string; items: SManga[]; page: number; loading: boolean; exhausted: boolean; error?: string }
 export default function BrowsePage() {
@@ -22,7 +23,7 @@ export default function BrowsePage() {
   const [panel, setPanel] = useState<'titles' | 'sources' | 'extensions'>(initial ? 'titles' : 'sources');
   const [sourceQuery, setSourceQuery] = useState('');
   const [sourceLanguage, setSourceLanguage] = useState('all');
-  const [sourceId, setSourceId] = useState(initial?.sourceId ?? 'mangadex');
+  const [sourceId, setSourceId] = useState(initial?.sourceId === 'all' || sources.some(source => source.id === initial?.sourceId) ? initial!.sourceId! : DEFAULT_SOURCE_ID);
   const [mode, setMode] = useState<'popular' | 'latest'>(initial?.mode ?? 'popular');
   const [query, setQuery] = useState(initial?.query ?? '');
   const [search, setSearch] = useState(initial?.query ?? '');
@@ -80,7 +81,7 @@ export default function BrowsePage() {
     const targets = sourceId === 'all' ? sources : sources.filter(s => s.id === sourceId);
     const saved = restore.current;
     restore.current = null;
-    if (saved && saved.query === search && saved.mode === mode && (saved.sourceId ?? 'mangadex') === sourceId && saved.items.length && attempt === 0) {
+    if (saved && saved.query === search && saved.mode === mode && (saved.sourceId ?? DEFAULT_SOURCE_ID) === sourceId && saved.items.length && attempt === 0) {
       setGroups(targets.map(source => ({ id: source.id, name: source.name, items: saved.items.filter(m => m.sourceId === source.id), page: saved.pages?.[source.id] ?? 1, loading: false, exhausted: saved.exhausted?.[source.id] ?? false })));
       requestAnimationFrame(() => window.scrollTo(0, saved.scrollY));
       return;
@@ -147,7 +148,7 @@ export default function BrowsePage() {
       <p className="muted">Save this title to one or more library categories.</p>
       {data?.categories.map(c => <label className="form-row" key={c.id}>{c.name}<input type="checkbox" checked={categoryDraft.includes(c.name)} onChange={e => setCategoryDraft(old => e.target.checked ? [...old, c.name] : old.filter(n => n !== c.name))} /></label>)}
       <button className="btn wide" disabled={busy} onClick={() => void menuAction(() => library.has(menuKey) ? setLibraryCategory(menuKey, categoryDraft) : addToLibrary(menuKey, categoryDraft))}>{library.has(menuKey) ? 'Save categories' : 'Add to library'}</button>
-      {library.has(menuKey) && <button className="text-btn danger" disabled={busy} onClick={() => { if (window.confirm('Remove this title from your library? Reading progress is kept.')) void menuAction(() => removeFromLibrary(menuKey)); }}>Remove from library</button>}
+      {library.has(menuKey) && <button className="text-btn danger" disabled={busy} onClick={() => { if (window.confirm('Remove this title and its downloaded files? Reading history and progress are kept.')) void menuAction(() => removeFromLibrary(menuKey)); }}>Remove from library</button>}
     </Sheet>}
   </main>;
 }

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { backupSourceConfigs } from '../sources/backupSources';
+import { DEFAULT_SOURCE_ID, getSource } from '../sources';
 import { browserSourceEnabled, setBrowserSource } from '../lib/browserSources';
 import { fetchWithTimeout } from '../lib/fetchJson';
 import SourceLogo from './SourceLogo';
@@ -7,7 +8,8 @@ import SourceLogo from './SourceLogo';
 interface Snapshot { configured: boolean; image: string; width: number; height: number; title: string; url: string; requiresVerification: boolean }
 export default function BrowserSourcesPanel() {
   const initial = new URLSearchParams(location.hash.split('?')[1]).get('source');
-  const [sourceId, setSourceId] = useState(backupSourceConfigs.some(source => source.id === initial) ? initial! : backupSourceConfigs[0].id);
+  const available = backupSourceConfigs.filter(source => getSource(source.id) && source.id !== '4841602236575491202');
+  const [sourceId, setSourceId] = useState(available.some(source => source.id === initial) ? initial! : DEFAULT_SOURCE_ID);
   const [configured, setConfigured] = useState<boolean | null>(null);
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
   const [enabled, setEnabled] = useState(() => browserSourceEnabled(sourceId));
@@ -43,7 +45,7 @@ export default function BrowserSourcesPanel() {
   }, [snapshot?.configured, update]);
   return <section className="settings-card browser-verification" aria-label="Browser verification">
     <h3>Browser verification</h3><p className="muted">Open a source in your server's browser. Complete website verification here, then use the same session for browsing and reading.</p>
-    <label className="field-label">Source<select aria-label="Verification source" value={sourceId} onChange={event => { generation.current++; controller.current?.abort(); inFlight.current = false; setSourceId(event.target.value); setEnabled(browserSourceEnabled(event.target.value)); setSnapshot(null); setError(''); setBusy(false); }}>{backupSourceConfigs.map(source => <option key={source.id} value={source.id}>{source.name}</option>)}</select></label>
+    <label className="field-label">Source<select aria-label="Verification source" value={sourceId} onChange={event => { generation.current++; controller.current?.abort(); inFlight.current = false; setSourceId(event.target.value); setEnabled(browserSourceEnabled(event.target.value)); setSnapshot(null); setError(''); setBusy(false); }}>{available.map(source => <option key={source.id} value={source.id}>{source.name}</option>)}</select></label>
     <div className="source-review-row"><SourceLogo id={sourceId} name={source.name} /><div><strong>{source.name}</strong><small>{configured === null ? 'Checking browser backend…' : configured ? 'Browser backend connected' : 'Browser backend needs setup'}</small></div></div>
     <label className="form-row">Use browser session for this source<input type="checkbox" checked={enabled} disabled={!configured && !enabled} onChange={event => { setBrowserSource(sourceId, event.target.checked); setEnabled(event.target.checked); }} /></label>
     {configured && <div className="button-row"><button className="btn" disabled={busy} onClick={() => void update({ type: 'open' })}>{busy ? 'Opening…' : 'Open source browser'}</button>{snapshot && <button className="btn-ghost outlined" disabled={busy} onClick={() => void update()}>Refresh view</button>}</div>}

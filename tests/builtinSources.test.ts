@@ -7,8 +7,10 @@ import { chapterKey, mangaKey } from '../src/sources/Source';
 import { getChapterState, putChapterMetas, patchChapterState } from '../src/lib/db';
 import { cdnUrl } from '../src/lib/fetchJson';
 
-it('includes only the backup source identities by default, with both Manhwa18 IDs and no sample catalog', () => {
-  expect(sources.filter(source => source.kind === 'builtin').map(source => source.id).sort()).toEqual(['mangadex', '4758858684982406533', '2528986671771677900', '993336618407081332', '4841602236575491202', '6247824327199706550', '7798162483793432927', '6484561431658238800', '3112384885023225761'].sort());
+it('includes only the four selected sources and resolves the legacy Manhwa18 identity without a duplicate', () => {
+  expect(sources.filter(source => source.kind === 'builtin').map(source => source.id).sort()).toEqual(['2528986671771677900', '993336618407081332', '6247824327199706550', '6484561431658238800'].sort());
+  expect(getSource('4841602236575491202')?.name).toContain('Manhwa18');
+  expect(getSource('mangadex')).toBeUndefined(); expect(getSource('4758858684982406533')).toBeUndefined();
   expect(getSource('sample')).toBeUndefined();
 });
 it('preserves imported chapter keys, marks, bookmarks and refreshed URLs within the same source title', async () => {

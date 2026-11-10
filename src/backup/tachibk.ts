@@ -1,7 +1,7 @@
 import { chapterKey, mangaKey, type MangaStatus, type SChapter, type SManga } from '../sources/Source';
 import { getSource } from '../sources';
 import { coverArt } from '../sources/svgArt';
-import { dispatchDataEvent, getCategories, getDB, libraryCategories, type CategoryRecord } from '../lib/db';
+import { dispatchDataEvent, downloadRemovalKey, getCategories, getDB, libraryCategories, type CategoryRecord } from '../lib/db';
 import { saveSettings, type ReaderMode } from '../lib/settings';
 import { mihonLibrarySort } from '../lib/librarySort';
 import { blobPart } from '../lib/bytes';
@@ -172,6 +172,7 @@ export async function restoreTachibk(preview: TachibkPreview, options: RestoreOp
         stateStore.put(restoredState);
       }
       if (pm.favorite) {
+        await tx.objectStore('metadata').delete(downloadRemovalKey(key));
         const categoryNames = [...new Set(pm.categories.map(id => byOrder.get(id.toString()) ?? byId.get(id.toString())).filter((v): v is string => !!v))];
         const old = await tx.objectStore('library').get(key);
         const membership = [...new Set([...categoryNames, ...(old ? libraryCategories(old) : [])])];

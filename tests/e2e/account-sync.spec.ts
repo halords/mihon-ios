@@ -5,9 +5,9 @@ async function seedDevice(page: Page) {
   await expect(page.getByRole('heading', { name: /^Library/ })).toBeVisible();
   await page.evaluate(async () => {
     const db = await new Promise<IDBDatabase>(resolve => { const request = indexedDB.open('mihon-pwa'); request.onsuccess = () => resolve(request.result); });
-    const key = 'mangadex::sync-hero'; const chapterKey = key + '::chapter-1';
+    const key = '6247824327199706550::sync-hero'; const chapterKey = key + '::chapter-1';
     const tx = db.transaction(['manga', 'library', 'chapterMeta', 'chapterState', 'history', 'archives'], 'readwrite');
-    tx.objectStore('manga').put({ key, manga: { id: 'sync-hero', sourceId: 'mangadex', title: 'Synced Hero', coverUrl: '', genres: [], description: '', status: 'Ongoing' }, updatedAt: 10 });
+    tx.objectStore('manga').put({ key, manga: { id: 'sync-hero', sourceId: '6247824327199706550', title: 'Synced Hero', coverUrl: '', genres: [], description: '', status: 'Ongoing' }, updatedAt: 10 });
     tx.objectStore('library').put({ key, category: 'Reading', categories: ['Reading'], addedAt: 20 });
     tx.objectStore('chapterMeta').put({ key: chapterKey, mangaKey: key, chapter: { id: 'chapter-1', mangaId: 'sync-hero', name: 'Chapter 1', number: 1, dateUpload: 1000 } });
     tx.objectStore('chapterState').put({ key: chapterKey, mangaKey: key, read: true, lastPage: 8, lastReadAt: 100, downloaded: false, bookmark: true });
@@ -34,7 +34,7 @@ async function local(page: Page, store: string) {
   }, store);
 }
 async function markUnread(page: Page) {
-  await page.goto('/#/details?' + new URLSearchParams({ manga: 'mangadex::sync-hero' }));
+  await page.goto('/#/details?' + new URLSearchParams({ manga: '6247824327199706550::sync-hero' }));
   await page.getByRole('button', { name: 'Options for Chapter 1' }).click();
   await page.getByRole('button', { name: 'Mark as unread', exact: true }).click();
   await expect(page.locator('.chapter-row.is-read')).toHaveCount(0);
@@ -99,8 +99,8 @@ test('adds a device library on first login and restores its arrangement and unfi
   await page.evaluate(async () => {
     const db = await new Promise<IDBDatabase>(resolve => { const request = indexedDB.open('mihon-pwa'); request.onsuccess = () => resolve(request.result); });
     const tx = db.transaction(['chapterState', 'categories'], 'readwrite');
-    const key = 'mangadex::sync-hero::chapter-1';
-    tx.objectStore('chapterState').put({ key, mangaKey: 'mangadex::sync-hero', read: false, lastPage: 8, pageOffset: 0.35, downloaded: false, bookmark: true });
+    const key = '6247824327199706550::sync-hero::chapter-1';
+    tx.objectStore('chapterState').put({ key, mangaKey: '6247824327199706550::sync-hero', read: false, lastPage: 8, pageOffset: 0.35, downloaded: false, bookmark: true });
     tx.objectStore('categories').put({ id: 'category:Reading', name: 'Reading', order: 0 });
     tx.objectStore('categories').put({ id: 'category:Default', name: 'Default', order: 1 });
     await new Promise<void>(resolve => { tx.oncomplete = () => resolve(); }); db.close();

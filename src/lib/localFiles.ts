@@ -1,5 +1,5 @@
 import { unzip, zip, strToU8 } from 'fflate';
-import { getChapterMetas, getManga, getDownload, getDB, libraryCategories, dispatchDataEvent } from './db';
+import { downloadRemovalKey, getChapterMetas, getManga, getDownload, getDB, libraryCategories, dispatchDataEvent } from './db';
 import { isChapterCached, PAGES_CACHE, pageCacheKey } from './downloads';
 import { blobPart } from './bytes';
 import { chapterKey, mangaKey, splitMangaKey, type SChapter, type SManga } from '../sources/Source';
@@ -48,7 +48,7 @@ export async function importCbz(file: File, title: string, targetKey?: string): 
   const id = existing?.chapter.id ?? `cbz:${[...new Uint8Array(digest)].map(v => v.toString(16).padStart(2, '0')).join('')}`;
   const cKey = chapterKey(sourceId, mangaId, id);
   const cache = await caches.open(PAGES_CACHE);
-  const stagingKey = `cbz-staging:${crypto.randomUUID()}`;
+  const stagingKey = `${cKey}::cbz-staging:${crypto.randomUUID()}`;
   const previousDownload = await getDownload(cKey);
   let committed = false;
   let byteSize = 0;
@@ -70,7 +70,8 @@ export async function importCbz(file: File, title: string, targetKey?: string): 
     const chapter: SChapter = { ...existing?.chapter, id, mangaId, name: existing?.chapter.name ?? chapterName, number: existing?.chapter.number ?? number, dateUpload: existing?.chapter.dateUpload ?? Date.now() };
     const db = await getDB();
     if (!await isChapterCached(cKey, names.length, stagingKey)) throw new Error('Some imported pages could not be saved');
-    const tx = db.transaction(['manga', 'chapterMeta', 'library', 'downloads', 'chapterState'], 'readwrite');
+    const tx = db.transaction(['manga', 'chapterMeta', 'library', 'downloads', 'chapterState', 'metadata'], 'readwrite');
+    await tx.objectStore('metadata').delete(downloadRemovalKey(key));
     await tx.objectStore('manga').put({ ...stored, key, manga, sourceAvailable: false, updatedAt: Date.now() });
     await tx.objectStore('chapterMeta').put({ key: cKey, mangaKey: key, chapter });
     const entry = await tx.objectStore('library').get(key);

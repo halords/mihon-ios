@@ -19,6 +19,7 @@ async function refresh(broadcast = true): Promise<void> {
   const [jobs, paused] = await Promise.all([getDownloadJobs(), db.get('metadata', 'downloads:paused')]);
   snapshot = { jobs, paused: paused?.value === true, offline: navigator.onLine === false };
   if (snapshot.paused) current?.controller.abort(new DOMException('Paused', 'AbortError'));
+  if (current && !jobs.some(job => job.key === current!.key)) current.controller.abort(new DOMException('Removed', 'AbortError'));
   for (const fn of listeners) fn();
   if (broadcast) channel?.postMessage('changed');
 }
@@ -55,7 +56,11 @@ async function processQueue(): Promise<void> {
       if (!job) break;
       const controller = new AbortController();
       current = { key: job.key, controller };
-      await db.put('downloadQueue', { ...job, status: 'downloading', error: undefined, updatedAt: Date.now() });
+      const claim = db.transaction('downloadQueue', 'readwrite');
+      const latest = await claim.store.get(job.key);
+      if (latest?.status === 'queued') await claim.store.put({ ...latest, status: 'downloading', error: undefined, updatedAt: Date.now() });
+      await claim.done;
+      if (latest?.status !== 'queued') { current = undefined; continue; }
       await refresh();
       try {
         await downloadChapter(job.mangaKey, job.key, job.sourceId, job.mangaId, job.chapterId, async (done, total) => {
@@ -150,6 +155,17 @@ export async function removeDownloadJob(key: string): Promise<void> {
   if (current?.key === key) current.controller.abort(new DOMException('Removed', 'AbortError'));
   await db.delete('downloadQueue', key);
   await deleteChapterDownload(job.mangaKey, key);
+  await refresh();
+}
+export async function cancelMangaDownloadJobs(mangaKey: string): Promise<void> {
+  const db = await getDB();
+  const tx = db.transaction('downloadQueue', 'readwrite');
+  for (const job of await tx.store.getAll()) {
+    if (job.mangaKey !== mangaKey) continue;
+    if (current?.key === job.key) current.controller.abort(new DOMException('Title removed', 'AbortError'));
+    await tx.store.delete(job.key);
+  }
+  await tx.done;
   await refresh();
 }
 export async function clearDownloadQueue(): Promise<void> {

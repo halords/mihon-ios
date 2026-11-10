@@ -2,7 +2,7 @@ import { test, expect, type Page, type Locator } from '@playwright/test';
 
 test.use({ serviceWorkers: 'block' });
 
-async function seedChapters(page: Page, sourceId = 'mangadex') {
+async function seedChapters(page: Page, sourceId = '6247824327199706550') {
   await page.goto('/#/library');
   await expect(page.getByRole('heading', { name: /^Library/ })).toBeVisible();
   const mangaKey = sourceId + '::selection-fixture';

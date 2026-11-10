@@ -135,7 +135,7 @@ test('keeps working browse results when another source fails', async ({ page }) 
   await page.getByRole('button', { name: 'Titles', exact: true }).click();
   await page.getByLabel('Browse source').selectOption('all');
   await expect(page.getByRole('button', { name: 'Open Ember Sea' })).toBeVisible();
-  await expect(page.getByRole('alert').filter({ hasText: 'HTTP 502' }).first()).toBeVisible();
+  await expect(page.getByRole('alert').filter({ hasText: /Unavailable test source|HTTP 502/ }).first()).toBeVisible();
 });
 
 test('installs relative extension indexes and retains class methods and private state across offline restarts', async ({ page, context }, info) => {

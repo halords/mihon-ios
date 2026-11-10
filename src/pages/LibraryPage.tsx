@@ -117,7 +117,7 @@ export default function LibraryPage() {
       })}><Icon name="download" /></button>
       <button className="icon-btn" disabled={!selected.size || busy} aria-label="Mark selected titles read" onClick={() => void run(async () => { for (const item of all.filter(i => selected.has(i.entry.key))) for (const c of item.chapters) await patchChapterState(c.key, item.entry.key, { read: true }); toast('Marked as read'); })}><Icon name="check" /></button>
       <button className="icon-btn" disabled={!selected.size || busy} aria-label="Remove selected titles from library" onClick={() => {
-        if (window.confirm(`Remove ${selected.size} titles from your library? Progress and downloads are kept.`)) void run(async () => { for (const key of selected) await removeFromLibrary(key); });
+        if (window.confirm(`Remove ${selected.size} titles and their downloaded files? Reading history and progress are kept.`)) void run(async () => { for (const key of selected) await removeFromLibrary(key); });
       }}><Icon name="trash" /></button>
     </div>}
     {sheet === 'filters' && <Sheet title="Library options" onClose={() => setSheet(null)}>

@@ -171,7 +171,7 @@ export interface MihonDB extends DBSchema {
   history: {
     key: string;
     value: HistoryRecord;
-    indexes: { 'by-manga': string };
+    indexes: { 'by-manga': string; 'by-updated': [number, string] };
   };
   downloads: {
     key: string;
@@ -184,7 +184,7 @@ let databasePromise: Promise<IDBPDatabase<MihonDB>> | undefined;
 
 export async function getRawDB(): Promise<IDBPDatabase<MihonDB>> {
   if (!databasePromise) {
-    databasePromise = openDB<MihonDB>('mihon-pwa', 6, {
+    databasePromise = openDB<MihonDB>('mihon-pwa', 7, {
       upgrade(db, oldVersion, _nextVersion, tx) {
         if (oldVersion < 1) {
           db.createObjectStore('manga', { keyPath: 'key' });
@@ -229,6 +229,7 @@ export async function getRawDB(): Promise<IDBPDatabase<MihonDB>> {
           const preferences = db.createObjectStore('libraryPreferences', { keyPath: 'key' });
           unwrap(preferences).put({ key: 'arrangement', ...libraryArrangement() });
         }
+        if (oldVersion < 7) tx.objectStore('history').createIndex('by-updated', ['updatedAt', 'key']);
       },
       blocked() { dispatchDataEvent('mihon:database-blocked'); },
       blocking(_current, _next, event) {
@@ -385,12 +386,14 @@ export async function addToLibrary(
   addedAt?: number,
 ): Promise<void> {
   const db = await getDB();
-  const tx = db.transaction('library', 'readwrite');
-  const existing = await tx.store.get(key);
+  const tx = db.transaction(['library', 'metadata'], 'readwrite');
+  const store = tx.objectStore('library');
+  await tx.objectStore('metadata').delete(downloadRemovalKey(key));
+  const existing = await store.get(key);
 
   const categories = [...new Set(Array.isArray(category) ? category : [category])];
   await Promise.all([
-    tx.store.put({
+    store.put({
       key,
       category: categories[0] ?? 'Default',
       categories: categories.length ? categories : ['Default'],
@@ -403,8 +406,17 @@ export async function addToLibrary(
 
 export async function removeFromLibrary(key: string): Promise<void> {
   const db = await getDB();
-  await db.delete('library', key);
+  const tx = db.transaction(['library', 'metadata'], 'readwrite');
+  await tx.objectStore('metadata').put({ key: downloadRemovalKey(key), value: { pending: true } });
+  await tx.objectStore('library').delete(key);
+  await tx.done;
   dispatchDataEvent();
+  await (await import('./libraryFiles')).purgeMangaFiles(key);
+}
+
+export function downloadRemovalKey(key: string): string { return 'downloads:removed:' + key; }
+export async function isMangaDownloadRemoved(key: string): Promise<boolean> {
+  return !!await (await getRawDB()).get('metadata', downloadRemovalKey(key));
 }
 
 export async function setLibraryCategory(
@@ -723,6 +735,7 @@ export async function importData(input: unknown, restorePlugins = false): Promis
       });
     }
     for (const r of data.library) {
+      await tx.objectStore('metadata').delete(downloadRemovalKey(r.key));
       const old = await tx.objectStore('library').get(r.key);
       const categories = [...new Set([...libraryCategories(r), ...(old ? libraryCategories(old) : [])])];
       await tx.objectStore('library').put({ ...r, category: categories[0]!, categories, addedAt: old?.addedAt ?? r.addedAt });

@@ -7,26 +7,25 @@ import { parseTachibk } from '../../src/backup/parser';
 test.use({ serviceWorkers: 'block' });
 
 const sources = [
-  ['4758858684982406533', 'MangaHub'], ['2528986671771677900', 'Mangakakalot'],
-  ['993336618407081332', 'Manhwa18.cc'], ['4841602236575491202', 'Manhwa18.cc (legacy)'],
-  ['6247824327199706550', 'Asura Scans'], ['7798162483793432927', 'MangaLife'],
+  ['2528986671771677900', 'Mangakakalot'],
+  ['993336618407081332', 'Manhwa18.cc'],
+  ['6247824327199706550', 'Asura Scans'],
   ['6484561431658238800', 'MangaFox'],
-  ['3112384885023225761', 'Kissmanga.in'],
 ];
-async function fixtureRequests(page: Page, blockKiss = false, holdMangaDex = false) {
+async function fixtureRequests(page: Page, blockManhwa = false, holdManhwa = false) {
   // <img> requests do not call window.fetch. Serve their synthetic bytes
   // separately from the API fixtures used by the adapter methods.
   await page.context().route('**/api/source?*', async route => {
     if (new URL(route.request().url()).searchParams.has('image')) await route.fulfill({ contentType: 'image/svg+xml', body: '<svg xmlns="http://www.w3.org/2000/svg" width="800" height="1200"><rect width="800" height="1200" fill="red"/></svg>' });
     else await route.continue();
   });
-  await page.addInitScript(({ blockKiss, holdMangaDex }) => {
+  await page.addInitScript(({ blockManhwa, holdManhwa }) => {
     const original = window.fetch.bind(window);
-    const held = holdMangaDex ? new Promise<void>(resolve => { Object.assign(window, { mihonFixtureRelease: resolve }); }) : undefined;
+    const held = holdManhwa ? new Promise<void>(resolve => { Object.assign(window, { mihonFixtureRelease: resolve }); }) : undefined;
     const image = '<svg xmlns="http://www.w3.org/2000/svg" width="800" height="1200"><rect width="800" height="600" fill="blue"/><rect y="600" width="800" height="600" fill="red"/></svg>';
     window.fetch = async (input, init) => {
       const request = new URL(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url, location.origin);
-      if (held && request.pathname === '/api/proxy') {
+      if (held && request.pathname === '/api/source' && request.searchParams.get('source') === '993336618407081332') {
         Object.assign(window, { mihonFixtureRequested: true });
         await held;
         return new Response('{"error":"Delayed old source error"}', { status: 502, headers: { 'Content-Type': 'application/json' } });
@@ -65,17 +64,17 @@ async function fixtureRequests(page: Page, blockKiss = false, holdMangaDex = fal
         return html('<ul class="manga-list-1-list manga-list-4-list"><li><a href="/manga/fixture/" title="Fixture Hero"><img src="https://c.mfcdn.net/cover.jpg"></a></li></ul>');
       }
       if (source === '3112384885023225761') {
-        if (blockKiss) return new Response(JSON.stringify({ error: 'Kissmanga.in is blocking app requests. Try again later or open the source website.' }), { status: 403, headers: { 'Content-Type': 'application/json' } });
         if (url.pathname.endsWith('/ajax/chapters/')) return html('<li class="wp-manga-chapter"><a href="https://kissmanga.in/kissmanga/fixture/chapter-1/">Chapter 1</a></li>');
         if (url.pathname.includes('/chapter-1')) return html('<div class="reading-content"><img src="https://kissmanga.in/fixture.jpg"></div>');
         if (url.pathname === '/kissmanga/fixture/') return html('<div class="post-title"><h1>Fixture Hero</h1></div><div class="summary_image"><img src="https://kissmanga.in/cover.jpg"></div>');
         return html('<div class="page-item-detail"><h3><a href="/kissmanga/fixture/">Fixture Hero</a></h3><img src="https://kissmanga.in/cover.jpg"></div>');
       }
+      if (blockManhwa) return new Response(JSON.stringify({ error: 'Manhwa18.cc is blocking app requests. Try again later or open the source website.' }), { status: 403, headers: { 'Content-Type': 'application/json' } });
       if (url.pathname.includes('/chapter-')) return html('<div class="read-content"><img data-src="https://manhwa18.cc/fixture/1.jpg"></div>');
       if (url.pathname === '/webtoon/fixture') return html('<div class="post-title"><h1>Fixture Hero</h1></div><div class="summary_image"><img src="https://manhwa18.cc/cover.jpg"></div><ul class="row-content-chapter"><li><a href="/webtoon/fixture/chapter-1">Chapter 1</a><span class="chapter-time">01 Jan 2026</span></li></ul>');
       return html('<div class="page-item-detail"><h3><a href="/webtoon/fixture">Fixture Hero</a></h3><img src="https://manhwa18.cc/cover.jpg"></div>');
     };
-  }, { blockKiss, holdMangaDex });
+  }, { blockManhwa, holdManhwa });
 }
 for (const [id, name] of sources) {
   test(`browses ${name}, loads chapters and reads its built-in pages without Suwayomi`, async ({ page }) => {
@@ -99,16 +98,16 @@ for (const [id, name] of sources) {
 test('shows only backup sources by default and explains a source access block', async ({ page }) => {
   await fixtureRequests(page, true);
   await page.goto('/#/browse');
-  await expect(page.locator('.source-browse-row')).toHaveCount(9);
-  await expect.poll(() => page.locator('.source-browse-row .source-logo img').evaluateAll(images => images.filter(image => (image as HTMLImageElement).naturalWidth > 0).length)).toBe(9);
+  await expect(page.locator('.source-browse-row')).toHaveCount(4);
+  await expect.poll(() => page.locator('.source-browse-row .source-logo img').evaluateAll(images => images.filter(image => (image as HTMLImageElement).naturalWidth > 0).length)).toBe(4);
   await expect(page.getByRole('button', { name: /Browse.*Demo/ })).toHaveCount(0);
-  await page.getByRole('button', { name: 'Browse Kissmanga.in EN', exact: true }).click();
+  await page.getByRole('button', { name: 'Browse Manhwa18.cc EN', exact: true }).click();
   await expect(page.getByRole('alert')).toContainText('blocking app requests');
-  await expect(page.getByRole('link', { name: 'Open source website', exact: true })).toHaveAttribute('href','https://kissmanga.in');
+  await expect(page.getByRole('link', { name: 'Open source website', exact: true })).toHaveAttribute('href','https://manhwa18.cc');
 });
 async function seedMigration(page: Page) {
   await page.goto('/#/browse');
-  await expect(page.locator('.source-browse-row')).toHaveCount(9);
+  await expect(page.locator('.source-browse-row')).toHaveCount(4);
   const key = '4758858684982406533::/manga/old-fixture';
   await page.evaluate(async key => {
     const db = await new Promise<IDBDatabase>((resolve, reject) => { const request = indexedDB.open('mihon-pwa'); request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error); });
@@ -169,7 +168,7 @@ test('discards an old replacement search when the user changes sources', async (
   await page.goto('/#/migrate?' + new URLSearchParams({ manga: original }));
   await expect(page.getByLabel('Search replacement title')).toHaveValue('Fixture Hero');
   await expect(page.getByRole('button', { name: 'Open Fixture Hero', exact: true })).toBeVisible();
-  await page.getByLabel('Replacement source').selectOption('mangadex');
+  await page.getByLabel('Replacement source').selectOption('993336618407081332');
   await page.waitForFunction(() => Reflect.get(window, 'mihonFixtureRequested'));
   await page.getByLabel('Replacement source').selectOption('2528986671771677900');
   await expect(page.getByRole('button', { name: 'Open Fixture Hero', exact: true })).toBeVisible();
@@ -177,17 +176,17 @@ test('discards an old replacement search when the user changes sources', async (
   await expect(page.getByRole('alert')).toHaveCount(0);
   await page.getByRole('button', { name: 'Open Fixture Hero', exact: true }).click();
   await expect(page.locator('.migration-review')).toContainText('Mangakakalot');
-  await page.getByLabel('Replacement source').selectOption('4758858684982406533');
+  await page.getByLabel('Replacement source').selectOption('6247824327199706550');
   await expect(page.locator('.migration-review')).toHaveCount(0);
   await page.getByRole('button', { name: 'Open Fixture Hero', exact: true }).click();
-  await expect(page.locator('.migration-review')).toContainText('MangaHub');
+  await expect(page.locator('.migration-review')).toContainText('Asura Scans');
 });
 test.describe('built-in offline reading', () => {
 test.use({ serviceWorkers: 'allow' });
 test('downloads and cold-reloads a built-in chapter offline without a server connection', async ({ page, context }) => {
   await fixtureRequests(page);
   await page.goto('/#/browse');
-  await page.getByRole('button', { name: 'Browse MangaHub EN', exact: true }).click();
+  await page.getByRole('button', { name: 'Browse Mangakakalot EN', exact: true }).click();
   await page.getByRole('button', { name: 'Open Fixture Hero', exact: true }).click();
   await page.getByRole('button', { name: 'Download', exact: true }).click();
   await page.getByRole('button', { name: /Next 5 unread chapters/ }).click();

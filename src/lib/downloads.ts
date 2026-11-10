@@ -1,5 +1,5 @@
 import { getSource } from '../sources';
-import { dispatchDataEvent, getChapterMetas, getDB, getDownload, getDownloadsForManga, type DownloadRecord } from './db';
+import { dispatchDataEvent, downloadRemovalKey, getChapterMetas, getDB, getDownload, getDownloadsForManga, isMangaDownloadRemoved, type DownloadRecord } from './db';
 import { fetchImage } from './fetchJson';
 import { blobPart } from './bytes';
 import { imageDimensions } from './images';
@@ -42,7 +42,11 @@ export async function isChapterCached(key: string, count: number, storageKey?: s
 export async function commitDownload(record: DownloadRecord): Promise<void> {
   if (!(await isChapterCached(record.key, record.pageCount, record.cacheKey))) throw new Error('Some downloaded pages are missing. Retry the download.');
   const db = await getDB();
-  const tx = db.transaction(['downloads', 'chapterState'], 'readwrite');
+  const tx = db.transaction(['downloads', 'chapterState', 'metadata'], 'readwrite');
+  if (await tx.objectStore('metadata').get(downloadRemovalKey(record.mangaKey))) {
+    tx.abort(); await tx.done.catch(() => {});
+    throw new Error('This title was removed. Add it back to your library before downloading.');
+  }
   const state = await tx.objectStore('chapterState').get(record.key);
   await tx.objectStore('downloads').put(record);
   await tx.objectStore('chapterState').put({ key: record.key, mangaKey: record.mangaKey, read: false, lastPage: 0, ...state, downloaded: true });
@@ -60,6 +64,7 @@ export async function downloadChapter(
   const abort = () => controller.abort(signal?.reason);
   if (signal?.aborted) abort(); else signal?.addEventListener('abort', abort, { once: true });
   const promise = (async () => {
+    if (await isMangaDownloadRemoved(mangaKey)) throw new Error('Add this title back to your library before downloading.');
     const existing = await getDownload(key);
     if (existing && await isChapterCached(key, existing.pageCount)) {
       await onProgress?.(existing.pageCount, existing.pageCount);
@@ -103,6 +108,7 @@ export async function downloadChapter(
         checkAbort(controller.signal);
         if (!blob) throw new Error(`Unable to download page ${index + 1}`);
         const size = await imageDimensions(blob, controller.signal);
+        if (await isMangaDownloadRemoved(mangaKey)) throw new Error('This title was removed from your library.');
         dimensions.push({ width: size.width ?? page.width, height: size.height ?? page.height });
         try {
           await cache.put(pageCacheKey(key, index), new Response(blob, { headers: { 'Content-Type': blob.type || 'application/octet-stream', 'X-Mihon-Page': identity, 'X-Mihon-Width': String(size.width ?? page.width ?? ''), 'X-Mihon-Height': String(size.height ?? page.height ?? '') } }));
@@ -111,6 +117,10 @@ export async function downloadChapter(
           throw error;
         }
         bytes += blob.size;
+      }
+      if (await isMangaDownloadRemoved(mangaKey)) {
+        await cache.delete(pageCacheKey(key, index));
+        throw new Error('This title was removed from your library.');
       }
       await onProgress?.(index + 1, pages.length);
     }
@@ -145,7 +155,33 @@ export async function deleteChapterDownload(mangaKey: string, key: string): Prom
   dispatchDataEvent('mihon:downloads-changed');
 }
 export async function deleteMangaDownloads(mangaKey: string): Promise<void> {
-  for (const record of await getDownloadsForManga(mangaKey)) await deleteChapterDownload(mangaKey, record.key);
+  const tasks = [...active].filter(([key]) => key.startsWith(mangaKey + '::')).map(([, task]) => task);
+  for (const task of tasks) task.controller.abort(new DOMException('Title downloads removed', 'AbortError'));
+  await Promise.allSettled(tasks.map(task => task.promise));
+  const downloads = await getDownloadsForManga(mangaKey);
+  if (typeof caches !== 'undefined') {
+    const cache = await caches.open(PAGES_CACHE);
+    const namespaces = new Set(downloads.map(record => record.cacheKey).filter((key): key is string => !!key));
+    const requests = (await cache.keys()).filter(request => {
+      const url = new URL(request.url);
+      if (url.origin !== 'https://cache.mihon.local') return false;
+      const namespace = decodeURIComponent(url.pathname.split('/')[1] ?? '');
+      return namespace.startsWith(mangaKey + '::') || namespaces.has(namespace);
+    });
+    // Include partial pages with no manifest and CBZ replacement namespaces.
+    // Enumerate the cache once for the entire title, not once per chapter.
+    for (let start = 0; start < requests.length; start += 24) {
+      await Promise.all(requests.slice(start, start + 24).map(request => cache.delete(request)));
+    }
+  }
+  const db = await getDB();
+  const tx = db.transaction(['downloads', 'chapterState'], 'readwrite');
+  for (const record of downloads) await tx.objectStore('downloads').delete(record.key);
+  for (const state of await tx.objectStore('chapterState').index('by-manga').getAll(mangaKey)) {
+    if (state.downloaded) await tx.objectStore('chapterState').put({ ...state, downloaded: false });
+  }
+  await tx.done;
+  dispatchDataEvent('mihon:downloads-changed');
 }
 
 export async function getCachedChapterPages(key: string): Promise<string[] | null> {
@@ -196,6 +232,7 @@ export async function clearPagesCache(): Promise<void> {
 }
 
 export async function reconcileDownloads(): Promise<number> {
+  await (await import('./libraryFiles')).resumeLibraryFileCleanup();
   const db = await getDB();
   const downloads = await db.getAll('downloads');
   const cache = typeof caches === 'undefined' ? undefined : await caches.open(PAGES_CACHE);
