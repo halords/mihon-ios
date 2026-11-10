@@ -94,10 +94,21 @@ describe('transactional Mihon migration', () => {
     expect(await getLibraryEntry(key)).toBeDefined();
     expect(await (await getDB()).get('metadata', downloadRemovalKey(key))).toBeUndefined();
   });
-  it('rolls back the entire import if restoration fails mid-transaction', async () => {
+  it('keeps completed titles and drops backup-level records when restoration fails midway', async () => {
     const preview = await inspectTachibkFile(schemaFile());
     await expect(restoreTachibk(preview, { onProgress() { throw new Error('Simulated storage failure'); } })).rejects.toThrow('Simulated storage failure');
     const db = await getDB();
-    for (const name of ['manga', 'chapterState', 'library', 'categories', 'archives'] as const) expect(await db.count(name)).toBe(0);
+    // Per-title transactions: the first title (and the categories, which
+    // land first) committed before the failure and stay; the remaining
+    // titles and the backup-level archive record never landed.
+    expect(await db.count('manga')).toBe(1);
+    expect(await db.count('library')).toBe(1);
+    expect(await getLibraryEntry(key)).toBeDefined();
+    expect(await db.count('categories')).toBeGreaterThan(0);
+    expect(await db.count('archives')).toBe(0);
+    // Re-running the same restore completes it — every merge is idempotent.
+    await restoreTachibk(preview);
+    expect(await db.count('manga')).toBe(3);
+    expect(await getArchives()).toHaveLength(1);
   });
 });

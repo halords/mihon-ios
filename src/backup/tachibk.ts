@@ -118,23 +118,44 @@ export async function restoreTachibk(preview: TachibkPreview, options: RestoreOp
     trackingCount: preview.trackingCount, mangadexMatched: 0, availableCount: 0, unavailableCount: 0, archiveId: preview.archiveId,
   };
   const db = await getDB();
-  const tx = db.transaction(['manga', 'chapterMeta', 'chapterState', 'library', 'history', 'categories', 'metadata', 'archives'], 'readwrite');
+  // Read existing state once, up front. Chapter and history keys embed their
+  // manga key, so no two backup titles touch the same record and these maps
+  // stay valid across the per-title transactions below.
+  const readTx = db.transaction(['chapterState', 'history'], 'readonly');
+  const [oldStates, oldHistory] = await Promise.all([
+    readTx.objectStore('chapterState').getAll(), readTx.objectStore('history').getAll(),
+  ]);
+  const states = new Map(oldStates.map(state => [state.key, state]));
+  const histories = new Map(oldHistory.map(history => [history.key, history]));
+  // Categories land first, in their own transaction, so library memberships
+  // resolve while the restore is still running.
+  const categoryTx = db.transaction(['categories'], 'readwrite');
   try {
-    // Queue chapter writes together. A request/await round trip for every
-    // chapter makes large Android backups take many minutes in WebKit.
-    // Read existing state once inside this same atomic transaction.
-    const [oldStates, oldHistory] = await Promise.all([
-      tx.objectStore('chapterState').getAll(), tx.objectStore('history').getAll(),
-    ]);
-    const states = new Map(oldStates.map(state => [state.key, state]));
-    const histories = new Map(oldHistory.map(history => [history.key, history]));
-    // Native requests bubble failures to tx.done. They avoid creating a
-    // promise/success callback for every one of thousands of chapter writes.
-    const chapterStore = syncNativeStore(tx.objectStore('chapterMeta'));
-    const stateStore = syncNativeStore(tx.objectStore('chapterState'));
-    const historyStore = syncNativeStore(tx.objectStore('history'));
-    for (const category of categories) await tx.objectStore('categories').put(category);
+    for (const category of categories) await categoryTx.objectStore('categories').put(category);
+    await categoryTx.done;
+  } catch (error) {
+    try { categoryTx.abort(); } catch { /* already aborted */ }
+    await categoryTx.done.catch(() => {});
+    throw error;
+  }
+  // One transaction per title instead of a single transaction for the whole
+  // backup. A 60k-chapter backup issues ~160k writes plus one sync journal
+  // entry per write; as one transaction, nothing was durable until the very
+  // end, a backgrounded or killed tab rolled the entire restore back to
+  // zero, and sync upload could not start until everything had finished.
+  // Per-title commits make progress permanent title by title, and
+  // re-running an interrupted restore is safe: every merge is idempotent.
+  // On failure only the in-flight title rolls back; earlier titles stay.
+  let activeTx: { abort(): void; done: Promise<void> } | undefined;
+  try {
     for (const [index, pm] of backup.manga.entries()) {
+      const tx = db.transaction(['manga', 'chapterMeta', 'chapterState', 'library', 'history', 'metadata'], 'readwrite');
+      activeTx = tx;
+      // Native requests bubble failures to tx.done. They avoid creating a
+      // promise/success callback for every one of thousands of chapter writes.
+      const chapterStore = syncNativeStore(tx.objectStore('chapterMeta'));
+      const stateStore = syncNativeStore(tx.objectStore('chapterState'));
+      const historyStore = syncNativeStore(tx.objectStore('history'));
       const sourceName = names.get(pm.source.toString()) ?? (pm.source === 0n ? 'Local files' : `Source ${pm.source}`);
       const { sourceId, mangaId, available, dex } = resolveBackupSource(pm, sourceName);
       if (dex) result.mangadexMatched++;
@@ -155,6 +176,7 @@ export async function restoreTachibk(preview: TachibkPreview, options: RestoreOp
       });
       const chapterByUrl = new Map<string, { chapter: SChapter; key: string; lastPage: number }>();
       const backupReadAt = new Map<string, number>();
+      const writtenStates = new Set<string>();
       for (const history of pm.history) backupReadAt.set(history.url, Math.max(history.lastRead, backupReadAt.get(history.url) ?? 0));
       for (const pc of pm.chapters) {
         const id = dex ? extractUuid(pc.url) ?? pc.url : pc.url;
@@ -171,9 +193,14 @@ export async function restoreTachibk(preview: TachibkPreview, options: RestoreOp
           ...old, key: cKey, mangaKey: key,
           read: newer ? old!.read : pc.read || !!old?.read, bookmark: pc.bookmark || !!old?.bookmark,
           lastPage: newer ? old!.lastPage : Math.max(pc.lastPageRead, old?.lastPage ?? 0), downloaded: old?.downloaded ?? false,
+          // Folded into this single write (the history pass used to re-put
+          // every state just to bump this): the newest history read time
+          // for this chapter's URL.
+          lastReadAt: Math.max(old?.lastReadAt ?? 0, backupReadAt.get(pc.url) ?? 0),
         };
         states.set(cKey, restoredState);
         stateStore.put(restoredState);
+        writtenStates.add(cKey);
       }
       if (pm.favorite) {
         await tx.objectStore('metadata').delete(downloadRemovalKey(key));
@@ -202,28 +229,37 @@ export async function restoreTachibk(preview: TachibkPreview, options: RestoreOp
           histories.set(pair.key, history);
           historyStore.put(history);
         }
+        // States written in the chapter pass already carry the folded
+        // lastReadAt. Only a pre-existing state for a history-only chapter
+        // (not in this title's chapter list) still needs the bump here.
         const state = states.get(pair.key);
-        if (state) {
+        if (state && !writtenStates.has(pair.key)) {
           const restoredState = { ...state, lastReadAt: Math.max(h.lastRead, state.lastReadAt ?? 0) };
           states.set(pair.key, restoredState);
           stateStore.put(restoredState);
+          writtenStates.add(pair.key);
         }
         result.historyCount++;
       }
+      await tx.done;
       options.onProgress?.(index + 1, backup.manga.length);
     }
+    // Backup-level records land last, in their own transaction, so a
+    // retained original archive always represents a completed restore.
+    const finalTx = db.transaction(['metadata', 'archives'], 'readwrite');
+    activeTx = finalTx;
     for (const [key, value] of Object.entries({
       'mihon:sources': backup.sources, 'mihon:preferences': backup.preferences,
       'mihon:source-preferences': backup.sourcePreferences, 'mihon:extension-stores': backup.extensionStores,
-    })) await tx.objectStore('metadata').put({ key, value: jsonSafe(value) });
-    await tx.objectStore('archives').put({
+    })) await finalTx.objectStore('metadata').put({ key, value: jsonSafe(value) });
+    await finalTx.objectStore('archives').put({
       id: preview.archiveId, name: preview.name, importedAt: Date.now(), bytes: archiveBytes,
       mangaCount: preview.mangaCount, chapterCount: preview.chapterCount,
     });
-    await tx.done;
+    await finalTx.done;
   } catch (error) {
-    try { tx.abort(); } catch { /* already aborted */ }
-    await tx.done.catch(() => {});
+    try { activeTx?.abort(); } catch { /* already aborted */ }
+    await activeTx?.done.catch(() => {});
     throw error;
   }
   if (options.restorePreferences) {
