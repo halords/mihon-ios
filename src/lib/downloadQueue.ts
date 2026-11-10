@@ -12,6 +12,49 @@ let current: { key: string; controller: AbortController } | undefined;
 let channel: BroadcastChannel | undefined;
 const networkOffline = () => navigator.onLine === false;
 
+/** DownloadJob plus the queue's automatic-retry bookkeeping. Kept off the
+ * db.ts record type: jobs written before this feature simply lack the
+ * fields, and other writers spread records without dropping them. */
+export type DownloadJobRecord = DownloadJob & { attempts?: number; notBefore?: number };
+
+const MAX_AUTO_RETRIES = 2;
+/** Cooldowns before the 1st / 2nd automatic retry of a transiently failed
+ * chapter. Rate-limited sources (e.g. Mangakakalot under bulk downloads)
+ * get much longer cooldowns — retrying into a 429/503 after a few seconds
+ * just re-trips the limit. Exported as mutable values so tests can
+ * shorten them instead of waiting in real time. */
+export const AUTO_RETRY_DELAYS_MS = { transient: [5000, 15000], rateLimit: [60000, 180000] };
+/** Failures that retrying cannot fix; these fail immediately, as before. */
+const NON_TRANSIENT_MESSAGES = ['Device storage is full', 'removed from your library', 'no downloadable pages', 'too many pages', 'has no image URL'];
+function isRateLimitMessage(message: string): boolean {
+  return message.includes('HTTP 429') || message.includes('HTTP 503');
+}
+/** Cooldown before the next automatic retry, or undefined when the job
+ * should be marked failed: a non-transient error, or retries exhausted. */
+function autoRetryDelay(message: string, used: number): number | undefined {
+  if (NON_TRANSIENT_MESSAGES.some(text => message.includes(text))) return undefined;
+  if (used >= MAX_AUTO_RETRIES) return undefined;
+  const delays = isRateLimitMessage(message) ? AUTO_RETRY_DELAYS_MS.rateLimit : AUTO_RETRY_DELAYS_MS.transient;
+  return delays[used];
+}
+/** Sleep until the earliest queued retry cooldown expires. The due time
+ * is re-read every tick — a job's notBefore can move while waiting (a
+ * manual edit, another tab), and sleeping to a stale deadline would
+ * strand the retry. Returns false when the pump should stop instead
+ * (queue paused or connection lost); the jobs stay queued either way
+ * and a later pump picks them up. */
+async function waitForRetryDue(): Promise<boolean> {
+  for (;;) {
+    if (snapshot.paused || networkOffline()) return false;
+    const queued = (await getDownloadJobs() as DownloadJobRecord[]).filter(j => j.status === 'queued');
+    if (!queued.length) return true;
+    const dueAt = Math.min(...queued.map(j => j.notBefore ?? 0));
+    if (dueAt <= Date.now()) return true;
+    await new Promise(resolve => setTimeout(resolve, Math.min(250, Math.max(10, dueAt - Date.now()))));
+    await refresh(false);
+  }
+}
+
 export function subscribeDownloads(fn: () => void): () => void { listeners.add(fn); return () => listeners.delete(fn); }
 export function getQueueSnapshot(): QueueSnapshot { return snapshot; }
 async function refresh(broadcast = true): Promise<void> {
@@ -52,8 +95,18 @@ async function processQueue(): Promise<void> {
     while (!snapshot.paused && !networkOffline()) {
       await refresh(false);
       if (snapshot.paused || networkOffline()) break;
-      const queued = (await getDownloadJobs()).filter(j => j.status === 'queued');
-      if (!queued.length) break;
+      const waiting = (await getDownloadJobs() as DownloadJobRecord[]).filter(j => j.status === 'queued');
+      if (!waiting.length) break;
+      const now = Date.now();
+      const queued = waiting.filter(j => (j.notBefore ?? 0) <= now);
+      if (!queued.length) {
+        // Only auto-retry cooldowns remain: wait for the earliest one
+        // instead of dropping the pump — nothing else would re-arm it,
+        // and exiting here would strand the retry until the next
+        // unrelated queue event.
+        if (!await waitForRetryDue()) break;
+        continue;
+      }
       // Chapters download oldest first within each title (chapter number
       // ascending), so a series is readable from the start while the rest
       // is still coming down. Titles keep the order they were queued in.
@@ -70,8 +123,11 @@ async function processQueue(): Promise<void> {
       const controller = new AbortController();
       current = { key: job.key, controller };
       const claim = db.transaction('downloadQueue', 'readwrite');
-      const latest = await claim.store.get(job.key);
-      if (latest?.status === 'queued') await claim.store.put({ ...latest, status: 'downloading', error: undefined, updatedAt: Date.now() });
+      const latest = await claim.store.get(job.key) as DownloadJobRecord | undefined;
+      if (latest?.status === 'queued') {
+        const claimed: DownloadJobRecord = { ...latest, status: 'downloading', error: undefined, notBefore: undefined, updatedAt: Date.now() };
+        await claim.store.put(claimed);
+      }
       await claim.done;
       if (latest?.status !== 'queued') { current = undefined; continue; }
       await refresh();
@@ -85,11 +141,25 @@ async function processQueue(): Promise<void> {
         }, controller.signal);
         await db.delete('downloadQueue', job.key);
       } catch (error) {
-        const latest = await db.get('downloadQueue', job.key);
-        if (latest) await db.put('downloadQueue', {
-          ...latest, status: controller.signal.aborted ? snapshot.paused ? 'paused' : 'queued' : 'failed',
-          error: controller.signal.aborted ? undefined : error instanceof Error ? error.message : 'Download failed', updatedAt: Date.now(),
-        });
+        const latest = await db.get('downloadQueue', job.key) as DownloadJobRecord | undefined;
+        if (latest) {
+          let record: DownloadJobRecord;
+          if (controller.signal.aborted) {
+            record = { ...latest, status: snapshot.paused ? 'paused' : 'queued', error: undefined, updatedAt: Date.now() };
+          } else {
+            const message = error instanceof Error ? error.message : 'Download failed';
+            const delay = autoRetryDelay(message, latest.attempts ?? 0);
+            // Transient failures re-queue themselves with a cooldown
+            // instead of dying on the first bad page: one poisoned page
+            // fetch used to force a manual retry per chapter. The job
+            // keeps its original createdAt, so the title/chapter
+            // ordering above is unaffected when it runs again.
+            record = delay === undefined
+              ? { ...latest, status: 'failed', error: message, notBefore: undefined, updatedAt: Date.now() }
+              : { ...latest, status: 'queued', attempts: (latest.attempts ?? 0) + 1, notBefore: Date.now() + delay, error: undefined, updatedAt: Date.now() };
+          }
+          await db.put('downloadQueue', record);
+        }
       } finally { current = undefined; await refresh(); }
     }
   } finally { await wakeLock?.release().catch(() => {}); }
@@ -123,10 +193,13 @@ export async function enqueueChapters(mangaKey: string, chapterIds: string[]): P
     if (downloaded && await isChapterCached(key, downloaded.pageCount)) continue;
     const existing = await db.get('downloadQueue', key);
     if (existing && existing.status !== 'failed') continue;
-    await db.put('downloadQueue', {
+    // A re-added job starts its automatic-retry budget fresh.
+    const record: DownloadJobRecord = {
       key, mangaKey, sourceId, mangaId, chapterId, mangaTitle: manga?.manga.title ?? 'Manga', chapterName: meta.chapter.name,
       status: 'queued', done: existing?.done ?? 0, total: existing?.total ?? 0, createdAt: existing?.createdAt ?? Date.now(), updatedAt: Date.now(),
-    });
+      attempts: undefined, notBefore: undefined,
+    };
+    await db.put('downloadQueue', record);
     added++;
   }
   await refresh();
@@ -156,8 +229,12 @@ export async function waitForDownloadsIdle(): Promise<void> {
 export async function retryDownload(key: string): Promise<void> {
   await initDownloadQueue();
   const db = await getDB();
-  const job = await db.get('downloadQueue', key);
-  if (job) await db.put('downloadQueue', { ...job, status: 'queued', error: undefined });
+  const job = await db.get('downloadQueue', key) as DownloadJobRecord | undefined;
+  // A manual retry also resets the automatic-retry budget and cooldown.
+  if (job) {
+    const record: DownloadJobRecord = { ...job, status: 'queued', error: undefined, attempts: undefined, notBefore: undefined };
+    await db.put('downloadQueue', record);
+  }
   await refresh();
   void pump();
 }

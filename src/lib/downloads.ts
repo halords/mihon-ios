@@ -6,6 +6,24 @@ import { imageDimensions } from './images';
 import type { MangaPage } from '../sources/Source';
 
 export const PAGES_CACHE = 'mihon-pages-v1';
+// Page fetches get up to six attempts: sources/CDNs intermittently answer
+// with HTML interstitials or error pages served as HTTP 200, and one bad
+// page used to fail the whole chapter after ~1s of retries. The delays
+// between attempts are:
+const PAGE_FETCH_RETRY_DELAYS_MS = [500, 1000, 2000, 4000, 8000];
+const INVALID_IMAGE_MESSAGE = 'The source did not return a valid image';
+const EMPTY_IMAGE_MESSAGE = 'The source returned an empty image';
+
+/** Append a `_r=` cache-buster to the query part of a URL, keeping any
+ * `#hash` suffix byte-identical (sourceImages.ts parses `#tiles=...`
+ * from the hash for tiled images; corrupting it breaks decoding). */
+function cacheBustUrl(url: string, attempt: number): string {
+  if (url.startsWith('data:') || url.startsWith('blob:')) return url;
+  const hashAt = url.indexOf('#');
+  const base = hashAt === -1 ? url : url.slice(0, hashAt);
+  const hash = hashAt === -1 ? '' : url.slice(hashAt);
+  return `${base}${base.includes('?') ? '&' : '?'}_r=${attempt}${hash}`;
+}
 const active = new Map<string, { controller: AbortController; promise: Promise<number> }>();
 export function pageCacheKey(key: string, index: number): string {
   return `https://cache.mihon.local/${encodeURIComponent(key)}/${index}`;
@@ -104,17 +122,32 @@ export async function downloadChapter(
         dimensions[index] = { width, height };
       } else {
         let blob: Blob | undefined;
-        for (let attempt = 0; attempt < 3; attempt++) {
+        let retryUrl: string | undefined;
+        for (let attempt = 0; attempt <= PAGE_FETCH_RETRY_DELAYS_MS.length; attempt++) {
           checkAbort(controller.signal);
-          try { blob = await fetchImage(page.imageUrl, controller.signal); break; }
+          try { blob = await fetchImage(retryUrl ?? page.imageUrl, controller.signal); break; }
           catch (error) {
-            if (controller.signal.aborted || attempt === 2 || navigator.onLine === false) throw error;
-            await new Promise<void>(resolve => setTimeout(resolve, 350 * (attempt + 1)));
+            if (controller.signal.aborted || attempt === PAGE_FETCH_RETRY_DELAYS_MS.length || navigator.onLine === false) throw error;
+            // A non-image body (HTML interstitial / CDN error page served
+            // with HTTP 200) is usually a poisoned cache entry or a
+            // rate-limit page: bust the cache on the next attempt so the
+            // CDN is forced to re-fetch the real image. The cache identity
+            // above stays keyed to the original URL; only the fetch URL
+            // changes.
+            const message = error instanceof Error ? error.message : '';
+            if (message.includes(INVALID_IMAGE_MESSAGE) || message.includes(EMPTY_IMAGE_MESSAGE)) retryUrl = cacheBustUrl(page.imageUrl, attempt + 1);
+            await new Promise<void>(resolve => setTimeout(resolve, PAGE_FETCH_RETRY_DELAYS_MS[attempt]));
           }
         }
         checkAbort(controller.signal);
         if (!blob) throw new Error(`Unable to download page ${index + 1}`);
-        const size = await imageDimensions(blob, controller.signal);
+        // Decoding every page just to measure it is a major CPU cost
+        // during bulk downloads (phones heat up noticeably); when the
+        // source already supplied the page size, trust it and skip the
+        // decode entirely.
+        const size = typeof page.width === 'number' && page.width > 0 && typeof page.height === 'number' && page.height > 0
+          ? { width: page.width, height: page.height }
+          : await imageDimensions(blob, controller.signal);
         if (await isMangaDownloadRemoved(mangaKey)) throw new Error('This title was removed from your library.');
         dimensions[index] = { width: size.width ?? page.width, height: size.height ?? page.height };
         try {

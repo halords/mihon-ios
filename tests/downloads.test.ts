@@ -98,3 +98,27 @@ it('downloads pages through a parallel pool and stores them in page order', asyn
   const record = await (await getDB()).get('downloads', chapterKey);
   expect(record?.pageCount).toBe(6); expect(record?.pages).toHaveLength(6);
 });
+
+it('cache-busts retries after non-image responses and preserves the URL hash', async () => {
+  const fixture = testSource();
+  fixture.source.getPageList = vi.fn(async () => [{ imageUrl: 'https://pages.example/p.svg?x=1#frag=1' }]);
+  registerSource(fixture.source);
+  await putManga(fixture.manga);
+  await putChapterMetas(fixture.source.id, fixture.manga.id, fixture.chapters);
+  const urls: string[] = [];
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+    urls.push(String(url));
+    return urls.length < 3
+      ? new Response('<html>interstitial</html>', { headers: { 'Content-Type': 'text/html' } })
+      : new Response(svgPage('Page'), { headers: { 'Content-Type': 'image/svg+xml' } });
+  }));
+  await downloadChapter(key, chapterKey, 'test-source', '/hero', '/chapter/1');
+  // The first fetch uses the original URL; each retry after a non-image
+  // response is cache-busted in the query, with the hash byte-identical.
+  expect(urls).toEqual([
+    'https://pages.example/p.svg?x=1#frag=1',
+    'https://pages.example/p.svg?x=1&_r=1#frag=1',
+    'https://pages.example/p.svg?x=1&_r=2#frag=1',
+  ]);
+  expect(await getChapterState(chapterKey)).toMatchObject({ downloaded: true });
+});
