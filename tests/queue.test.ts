@@ -51,3 +51,16 @@ it('pauses, resumes partial progress, and clears queued jobs without duplicating
   await vi.waitFor(async () => expect(await getAllDownloads()).toHaveLength(1));
   expect(fetch).toHaveBeenCalledTimes(3);
 });
+
+it('downloads chapters oldest first regardless of enqueue order', async () => {
+  const f = testSource('queue-source', 3);
+  const order: string[] = [];
+  f.source.getPageList = async chapterId => { order.push(chapterId); return [{ imageUrl: 'https://pages.example/' + chapterId + '/1.svg' }]; };
+  registerSource(f.source); await putManga(f.manga); await putChapterMetas(f.source.id, f.manga.id, f.chapters);
+  await (await getDB()).put('metadata', { key: 'downloads:paused', value: true });
+  vi.stubGlobal('fetch', vi.fn(async () => new Response(svgPage('Page'), { headers: { 'Content-Type': 'image/svg+xml' } })));
+  await enqueueChapters(key, ['/chapter/3', '/chapter/1', '/chapter/2']);
+  await setDownloadsPaused(false);
+  await vi.waitFor(async () => expect(await getDownloadJobs()).toHaveLength(0));
+  expect(order).toEqual(['/chapter/1', '/chapter/2', '/chapter/3']);
+});

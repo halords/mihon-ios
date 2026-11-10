@@ -60,7 +60,7 @@ it('separates account profiles and rejects a remote page for the wrong active ac
   await activateAccountProfile('user-b'); expect(await getLibrary()).toHaveLength(0); expect(await getHistory()).toHaveLength(0);
   await expect(applyRemoteChanges([], 20, 'user-a')).rejects.toThrow('active account changed');
   await activateAccountProfile('user-a'); expect(await getLibrary()).toHaveLength(1); expect(await getHistory()).toHaveLength(1);
-  expect((await (await getRawDB()).get('syncProfiles', 'guest'))?.stores.library).toHaveLength(1);
+  await activateAccountProfile('guest'); expect(await getLibrary()).toHaveLength(1);
 });
 it('journals native import writes after the persisted clock and aborts writes from an old account tab', async () => {
   const raw = await getRawDB(); const db = await getDB();
@@ -86,4 +86,25 @@ it('keeps local writes available when localStorage access is denied', async () =
     expect((await raw.get('syncRecords', syncId('library', 'mangadex::second')))!.deviceId).toBe(record.deviceId);
     expect(await getLibrary()).toHaveLength(2);
   } finally { getter.mockRestore(); }
+});
+
+it('chunks large profile snapshots, restores them whole, and reads legacy snapshots', async () => {
+  await activateAccountProfile('user-a');
+  const raw = await getRawDB();
+  const rows = Array.from({ length: 9000 }, (_, i) => ({ key: `mangadex::hero::ch-${i}`, mangaKey: 'mangadex::hero', chapter: { id: 'ch-' + i, name: 'Chapter ' + i, number: i } }));
+  const tx = raw.transaction('chapterMeta', 'readwrite'); const store = tx.objectStore('chapterMeta');
+  for (const row of rows) void store.put(row as never);
+  await tx.done;
+  await activateAccountProfile('user-b');
+  const profiles = await raw.getAll('syncProfiles');
+  expect(profiles.find(profile => profile.key === 'user-a')).toMatchObject({ chunked: true });
+  const metaChunks = profiles.filter(profile => profile.key.startsWith('user-a\u0000chunk\u0000chapterMeta\u0000'));
+  expect(metaChunks).toHaveLength(3);
+  for (const profile of profiles) if ('rows' in profile) expect((profile as { rows: unknown[] }).rows.length).toBeLessThanOrEqual(4000);
+  expect(await raw.count('chapterMeta')).toBe(0);
+  await activateAccountProfile('user-a');
+  expect(await raw.count('chapterMeta')).toBe(9000);
+  await raw.put('syncProfiles', { key: 'user-c', stores: { manga: [{ key: 'mangadex::legacy', manga: { id: 'legacy', sourceId: 'mangadex', title: 'Legacy', coverUrl: '', genres: [] } }] }, records: [], cursor: 3, clock: 4, lastSync: 5 });
+  await activateAccountProfile('user-c');
+  expect(await raw.get('manga', 'mangadex::legacy')).toBeDefined();
 });

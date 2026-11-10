@@ -82,9 +82,16 @@ export async function downloadChapter(
     if (navigator.storage?.persist) void navigator.storage.persist().catch(() => {});
     const cache = await caches.open(PAGES_CACHE);
     let bytes = 0;
-    const dimensions: DownloadRecord['pages'] = [];
+    const dimensions: DownloadRecord['pages'] = new Array(pages.length);
     await onProgress?.(0, pages.length);
-    for (const [index, page] of pages.entries()) {
+    // Pages run through a small parallel pool instead of strictly one at
+    // a time (a full fetch+decode+store round trip per page made chapter
+    // downloads far slower than a native reader). Results land by page
+    // index, so the stored page order and record shape are unchanged;
+    // progress reports pages completed, whichever order they finish in.
+    let next = 0; let completed = 0; let failure: unknown;
+    const fetchPage = async (index: number): Promise<void> => {
+      const page = pages[index]!;
       checkAbort(controller.signal);
       if (typeof page.imageUrl !== 'string' || !page.imageUrl) throw new Error(`Page ${index + 1} has no image URL`);
       const identity = await pageHash(page.imageUrl);
@@ -94,7 +101,7 @@ export async function downloadChapter(
         bytes += blob.size;
         const width = Number(hit.headers.get('X-Mihon-Width')) || page.width;
         const height = Number(hit.headers.get('X-Mihon-Height')) || page.height;
-        dimensions.push({ width, height });
+        dimensions[index] = { width, height };
       } else {
         let blob: Blob | undefined;
         for (let attempt = 0; attempt < 3; attempt++) {
@@ -109,7 +116,7 @@ export async function downloadChapter(
         if (!blob) throw new Error(`Unable to download page ${index + 1}`);
         const size = await imageDimensions(blob, controller.signal);
         if (await isMangaDownloadRemoved(mangaKey)) throw new Error('This title was removed from your library.');
-        dimensions.push({ width: size.width ?? page.width, height: size.height ?? page.height });
+        dimensions[index] = { width: size.width ?? page.width, height: size.height ?? page.height };
         try {
           await cache.put(pageCacheKey(key, index), new Response(blob, { headers: { 'Content-Type': blob.type || 'application/octet-stream', 'X-Mihon-Page': identity, 'X-Mihon-Width': String(size.width ?? page.width ?? ''), 'X-Mihon-Height': String(size.height ?? page.height ?? '') } }));
         } catch (error) {
@@ -122,8 +129,19 @@ export async function downloadChapter(
         await cache.delete(pageCacheKey(key, index));
         throw new Error('This title was removed from your library.');
       }
-      await onProgress?.(index + 1, pages.length);
-    }
+      completed++;
+      await onProgress?.(completed, pages.length);
+    };
+    const worker = async (): Promise<void> => {
+      while (!failure && !controller.signal.aborted) {
+        const index = next++;
+        if (index >= pages.length) return;
+        try { await fetchPage(index); }
+        catch (error) { failure ??= error; }
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(5, pages.length) }, () => worker()));
+    if (failure) throw failure;
     checkAbort(controller.signal);
     await commitDownload({ key, mangaKey, pageCount: pages.length, byteSize: bytes, downloadedAt: Date.now(), pages: dimensions });
     return pages.length;

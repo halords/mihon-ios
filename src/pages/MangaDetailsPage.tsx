@@ -106,6 +106,14 @@ export default function MangaDetailsPage({ mangaKey }: { mangaKey: string }) {
       toast(`${ids.length} ${ids.length === 1 ? 'chapter' : 'chapters'} marked as ${read ? 'read' : 'unread'}`);
     });
   }
+  function downloadSelection(): void {
+    const ids = [...selected];
+    if (!ids.length) return;
+    void run(async () => {
+      const count = await enqueueChapters(mangaKey, ids);
+      toast(count ? `${count} ${count === 1 ? 'chapter' : 'chapters'} added to the download queue` : 'Selected chapters are already downloaded or queued');
+    });
+  }
   const trackers = Array.isArray(data.stored.mihon?.tracking) ? data.stored.mihon.tracking as unknown as ParsedTracking[] : [];
   const readLabel = latest ? 'Continue reading' : unread.length && unread.length < readable.length ? 'Continue reading' : unread.length ? 'Start reading' : 'Read again';
   const actionKeys = selected.size ? [...selected] : activeChapter ? [activeChapter.id] : [];
@@ -145,6 +153,7 @@ export default function MangaDetailsPage({ mangaKey }: { mangaKey: string }) {
       <span className="chapter-selection-count" aria-live="polite" aria-atomic="true"><span className="sr-only">Selected chapters: </span>{selected.size}</span>
       <button className="chapter-mark-read" disabled={!selected.size || busy} aria-label="Mark selected chapters as read" onClick={() => markSelection(true)}><Icon name="check" size={19} />Read</button>
       <button className="chapter-mark-unread" disabled={!selected.size || busy} aria-label="Mark selected chapters as unread" onClick={() => markSelection(false)}><Icon name="library" size={18} />Unread</button>
+      <button className="chapter-mark-download" disabled={!selected.size || busy || !sourceAvailable} aria-label="Download selected chapters" onClick={downloadSelection}><Icon name="download" size={18} />Download</button>
       <button className="icon-btn" disabled={busy} aria-label="Cancel chapter selection" onClick={clearSelection}><Icon name="close" size={18} /></button>
     </div>}
     {sheet === 'categories' && <Sheet title="Library categories" onClose={() => setSheet(null)}>{categories.map(c => <label className="form-row" key={c.id}>{c.name}<input type="checkbox" checked={categoryDraft.includes(c.name)} onChange={e => setCategoryDraft(old => e.target.checked ? [...old, c.name] : old.filter(n => n !== c.name))} /></label>)}<button className="btn wide" disabled={busy} onClick={() => void run(() => setLibraryCategory(mangaKey, categoryDraft))}>Save categories</button><button className="text-btn danger" disabled={busy} onClick={() => { if (window.confirm('Remove this title and its downloaded files? Reading history and progress are kept.')) void run(() => removeFromLibrary(mangaKey)); }}>Remove from library</button></Sheet>}

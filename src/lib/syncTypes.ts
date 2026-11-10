@@ -15,6 +15,21 @@ export interface DeviceProfile {
   records: SyncRecord[]; cursor: number; clock: number; lastSync: number;
 }
 
+// On-disk snapshot layout (syncProfiles store). A whole device library
+// does not fit in one IndexedDB value — Chrome caps a single value at
+// ~127 MB and a restored library serializes past 150 MB — so snapshots
+// are stored as a manifest plus chunk records of a few thousand rows
+// each. DeviceProfile remains the logical, reassembled shape; records
+// written by older builds (a bare DeviceProfile) are still read as-is.
+export interface ProfileManifest {
+  key: string; chunked: true; cursor: number; clock: number; lastSync: number;
+  storeChunks: Partial<Record<typeof PROFILE_STORES[number], number>>;
+  storeCounts: Partial<Record<typeof PROFILE_STORES[number], number>>;
+  recordChunks: number; recordCount: number;
+}
+export interface ProfileChunk { key: string; chunk: true; rows: unknown[]; }
+export type StoredProfile = DeviceProfile | ProfileManifest | ProfileChunk;
+
 export function syncId(store: string, key: string): string { return store + '\u0000' + key; }
 export function canonical(value: unknown): string {
   if (Array.isArray(value)) return '[' + value.map(item => canonical(item ?? null)).join(',') + ']';

@@ -1,7 +1,7 @@
 import { useSyncExternalStore } from 'react';
 import { unwrap } from 'idb';
 import { getDB, getRawDB, importData, dispatchDataEvent, downloadRemovalKey, type BackupData } from './db';
-import { newer, PROFILE_STORES, validChange, type AccountUser, type DeviceProfile, type RemoteChange, type SyncRecord } from './syncTypes';
+import { newer, PROFILE_STORES, validChange, type AccountUser, type DeviceProfile, type ProfileChunk, type ProfileManifest, type RemoteChange, type StoredProfile, type SyncRecord } from './syncTypes';
 import { observeSyncClock, setSyncProfileContext } from './syncStorage';
 import { DEFAULT_SETTINGS, libraryArrangement, onLibraryArrangementChange, saveSettings, type LibraryArrangement } from './settings';
 
@@ -57,6 +57,72 @@ function cacheUser(user: AccountUser | null): void {
   try { if (user) localStorage.setItem('mihon-account', JSON.stringify(user)); else localStorage.removeItem('mihon-account'); } catch { /* The database retains the offline profile. */ }
 }
 
+// Profile snapshots are chunked (see StoredProfile in syncTypes.ts): a
+// restored library serializes past Chrome's ~127 MB single-value limit,
+// which made sign-in/registration fail outright on large guest libraries.
+// Chunks hold a few thousand rows each; legacy single-record snapshots
+// from older builds are still read unchanged.
+const PROFILE_CHUNK_ROWS = 4000;
+interface ProfileStoreHandle {
+  get(key: string): Promise<StoredProfile | undefined>;
+  getAll(query: IDBKeyRange): Promise<StoredProfile[]>;
+  put(value: StoredProfile): Promise<unknown>;
+  delete(query: string | IDBKeyRange): Promise<void>;
+}
+const chunkPrefix = (owner: string) => owner + '\u0000chunk\u0000';
+async function deleteProfileSnapshot(store: ProfileStoreHandle, key: string): Promise<void> {
+  const prefix = chunkPrefix(key);
+  await store.delete(IDBKeyRange.bound(prefix, prefix + '\uFFFF'));
+  await store.delete(key);
+}
+async function writeProfileSnapshot(store: ProfileStoreHandle, profile: DeviceProfile): Promise<void> {
+  await deleteProfileSnapshot(store, profile.key);
+  const prefix = chunkPrefix(profile.key);
+  const storeChunks: ProfileManifest['storeChunks'] = {};
+  const storeCounts: ProfileManifest['storeCounts'] = {};
+  for (const name of PROFILE_STORES) {
+    const rows = profile.stores[name] ?? [];
+    storeCounts[name] = rows.length;
+    const chunks = Math.ceil(rows.length / PROFILE_CHUNK_ROWS);
+    storeChunks[name] = chunks;
+    for (let i = 0; i < chunks; i++) {
+      const chunk: ProfileChunk = { key: `${prefix}${name}\u0000${String(i).padStart(6, '0')}`, chunk: true, rows: rows.slice(i * PROFILE_CHUNK_ROWS, (i + 1) * PROFILE_CHUNK_ROWS) };
+      await store.put(chunk);
+    }
+  }
+  const recordChunks = Math.ceil(profile.records.length / PROFILE_CHUNK_ROWS);
+  for (let i = 0; i < recordChunks; i++) {
+    const chunk: ProfileChunk = { key: `${prefix}records\u0000${String(i).padStart(6, '0')}`, chunk: true, rows: profile.records.slice(i * PROFILE_CHUNK_ROWS, (i + 1) * PROFILE_CHUNK_ROWS) };
+    await store.put(chunk);
+  }
+  const manifest: ProfileManifest = { key: profile.key, chunked: true, cursor: profile.cursor, clock: profile.clock, lastSync: profile.lastSync, storeChunks, storeCounts, recordChunks, recordCount: profile.records.length };
+  await store.put(manifest);
+}
+async function readProfileSnapshot(store: ProfileStoreHandle, key: string): Promise<DeviceProfile | undefined> {
+  const head = await store.get(key);
+  if (!head) return undefined;
+  if (!('chunked' in head)) return head as DeviceProfile;
+  const manifest = head as ProfileManifest;
+  const prefix = chunkPrefix(key);
+  const chunks = (await store.getAll(IDBKeyRange.bound(prefix, prefix + '\uFFFF'))).filter((row): row is ProfileChunk => 'chunk' in row);
+  const stores: DeviceProfile['stores'] = {};
+  const records: unknown[] = [];
+  for (const chunk of chunks) {
+    const kind = chunk.key.slice(prefix.length).split('\u0000')[0]!;
+    if (kind === 'records') records.push(...chunk.rows);
+    else (stores[kind as keyof DeviceProfile['stores']] ??= []).push(...chunk.rows);
+  }
+  return { key, stores: stores as DeviceProfile['stores'], records: records as SyncRecord[], cursor: manifest.cursor, clock: manifest.clock, lastSync: manifest.lastSync };
+}
+async function guestProfileCount(db: Awaited<ReturnType<typeof getRawDB>>): Promise<number> {
+  const store = db.transaction('syncProfiles').objectStore('syncProfiles') as unknown as ProfileStoreHandle;
+  const head = await store.get('guest');
+  if (!head) return 0;
+  if ('chunked' in head) { const manifest = head as ProfileManifest; return (manifest.storeCounts.library ?? 0) + (manifest.storeCounts.history ?? 0); }
+  const legacy = head as DeviceProfile;
+  return (legacy.stores.library?.length ?? 0) + (legacy.stores.history?.length ?? 0);
+}
+
 export async function activateAccountProfile(userId: string): Promise<void> {
   const db = await getRawDB();
   const tx = db.transaction([...PROFILE_STORES, 'syncRecords', 'syncControl', 'syncProfiles'] as const, 'readwrite');
@@ -67,8 +133,8 @@ export async function activateAccountProfile(userId: string): Promise<void> {
   stores.libraryPreferences = [{ key: 'arrangement', ...libraryArrangement() }];
   const profile: DeviceProfile = { key: owner, stores, records: await tx.objectStore('syncRecords').getAll(),
     cursor: Number((await tx.objectStore('syncControl').get('cursor'))?.value ?? 0), clock: Number((await tx.objectStore('syncControl').get('clock'))?.value ?? 0), lastSync: Number((await tx.objectStore('syncControl').get('lastSync'))?.value ?? 0) };
-  await tx.objectStore('syncProfiles').put(profile);
-  const next = await tx.objectStore('syncProfiles').get(userId);
+  await writeProfileSnapshot(tx.objectStore('syncProfiles') as unknown as ProfileStoreHandle, profile);
+  const next = await readProfileSnapshot(tx.objectStore('syncProfiles') as unknown as ProfileStoreHandle, userId);
   for (const store of PROFILE_STORES) {
     await tx.objectStore(store).clear();
     for (const record of next?.stores[store] ?? []) unwrap(tx.objectStore(store)).put(record);
@@ -174,8 +240,8 @@ export async function applyRemoteChanges(changes: RemoteChange[], cursor: number
 
 async function summary(): Promise<void> {
   const db = await getRawDB();
-  const [records, last, guest] = await Promise.all([db.getAll('syncRecords'), db.get('syncControl', 'lastSync'), db.get('syncProfiles', 'guest')]);
-  publish({ pending: records.filter(record => record.pending).length, lastSync: Number(last?.value ?? 0), deviceLibrary: (guest?.stores.library?.length ?? 0) + (guest?.stores.history?.length ?? 0) });
+  const [records, last, guestCount] = await Promise.all([db.getAll('syncRecords'), db.get('syncControl', 'lastSync'), guestProfileCount(db)]);
+  publish({ pending: records.filter(record => record.pending).length, lastSync: Number(last?.value ?? 0), deviceLibrary: guestCount });
 }
 function schedule(): void {
   if (timer || !state.user) return;
@@ -241,7 +307,7 @@ async function cycle(): Promise<void> {
 }
 export async function addDeviceLibrary(): Promise<void> {
   if (!state.user || !sessionVerified) throw new Error('Sign in before adding your device library.');
-  const db = await getRawDB(); const guest = await db.get('syncProfiles', 'guest');
+  const db = await getRawDB(); const guest = await readProfileSnapshot(db.transaction('syncProfiles').objectStore('syncProfiles') as unknown as ProfileStoreHandle, 'guest');
   if (!guest) return;
   const data: BackupData = { version: 2, exportedAt: Date.now(), manga: [], chapterMeta: [], chapterState: [], library: [], history: [], downloads: [], categories: [] };
   for (const store of ['manga', 'chapterMeta', 'chapterState', 'library', 'history', 'categories', 'downloads'] as const) (data[store] as unknown[]) = guest.stores[store] ?? [];
@@ -261,7 +327,7 @@ export async function addDeviceLibrary(): Promise<void> {
       if (!await tx.objectStore(store).get(key)) await tx.objectStore(store).put(value as never);
     }
   }
-  await tx.objectStore('syncProfiles').delete('guest'); await tx.done;
+  await deleteProfileSnapshot(tx.objectStore('syncProfiles') as unknown as ProfileStoreHandle, 'guest'); await tx.done;
   dispatchDataEvent('mihon:downloads-changed');
   const { setDownloadsPaused } = await import('./downloadQueue');
   await setDownloadsPaused(!!(await db.get('metadata', 'downloads:paused'))?.value);

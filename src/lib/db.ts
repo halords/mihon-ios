@@ -6,7 +6,7 @@ import type { ReaderMode, Settings, LibraryArrangement } from './settings';
 import { libraryArrangement, loadSettings, saveSettings } from './settings';
 import { fromBase64, toBase64, blobPart } from './bytes';
 import { trackSyncWrites } from './syncStorage';
-import type { DeviceProfile, SyncRecord } from './syncTypes';
+import type { StoredProfile, SyncRecord } from './syncTypes';
 
 export interface StoredManga {
   key: string;
@@ -140,7 +140,7 @@ export interface MihonDB extends DBSchema {
   libraryPreferences: { key: string; value: LibraryArrangement & { key: string } };
   syncRecords: { key: string; value: SyncRecord };
   syncControl: { key: string; value: MetadataRecord };
-  syncProfiles: { key: string; value: DeviceProfile };
+  syncProfiles: { key: string; value: StoredProfile };
   categories: { key: string; value: CategoryRecord };
   archives: { key: string; value: StoredArchiveRecord };
   metadata: { key: string; value: MetadataRecord };

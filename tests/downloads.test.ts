@@ -78,3 +78,23 @@ it('honors custom proxy templates for every source without double proxying or fo
   saveSettings({ proxyBase: 'https://proxy.example/fetch?target={url}' });
   expect(proxiedUrl(target)).toBe('https://proxy.example/fetch?target=' + encodeURIComponent(target));
 });
+
+it('downloads pages through a parallel pool and stores them in page order', async () => {
+  const fixture = testSource();
+  fixture.source.getPageList = vi.fn(async () => Array.from({ length: 6 }, (_, i) => ({ imageUrl: 'https://pages.example/' + i + '.svg' })));
+  registerSource(fixture.source);
+  await putManga(fixture.manga);
+  await putChapterMetas(fixture.source.id, fixture.manga.id, fixture.chapters);
+  let inFlight = 0; let maxInFlight = 0;
+  vi.stubGlobal('fetch', vi.fn(async () => {
+    inFlight++; maxInFlight = Math.max(maxInFlight, inFlight);
+    await new Promise(resolve => setTimeout(resolve, 25));
+    inFlight--;
+    return new Response(svgPage('Page'), { headers: { 'Content-Type': 'image/svg+xml' } });
+  }));
+  await downloadChapter(key, chapterKey, 'test-source', '/hero', '/chapter/1');
+  expect(maxInFlight).toBeGreaterThan(1);
+  expect((await getCachedPageList(chapterKey))?.length).toBe(6);
+  const record = await (await getDB()).get('downloads', chapterKey);
+  expect(record?.pageCount).toBe(6); expect(record?.pages).toHaveLength(6);
+});

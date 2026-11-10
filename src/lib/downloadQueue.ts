@@ -52,8 +52,21 @@ async function processQueue(): Promise<void> {
     while (!snapshot.paused && !networkOffline()) {
       await refresh(false);
       if (snapshot.paused || networkOffline()) break;
-      const job = (await getDownloadJobs()).find(j => j.status === 'queued');
-      if (!job) break;
+      const queued = (await getDownloadJobs()).filter(j => j.status === 'queued');
+      if (!queued.length) break;
+      // Chapters download oldest first within each title (chapter number
+      // ascending), so a series is readable from the start while the rest
+      // is still coming down. Titles keep the order they were queued in.
+      const numbers = new Map<string, number>();
+      for (const mangaKey of new Set(queued.map(j => j.mangaKey))) {
+        for (const meta of await getChapterMetas(mangaKey)) numbers.set(meta.key, meta.chapter.number);
+      }
+      const titleSince = new Map<string, number>();
+      for (const j of queued) titleSince.set(j.mangaKey, Math.min(titleSince.get(j.mangaKey) ?? Infinity, j.createdAt));
+      queued.sort((a, b) => (titleSince.get(a.mangaKey)! - titleSince.get(b.mangaKey)!)
+        || ((numbers.get(a.key) ?? Number.MAX_SAFE_INTEGER) - (numbers.get(b.key) ?? Number.MAX_SAFE_INTEGER))
+        || (a.createdAt - b.createdAt));
+      const job = queued[0]!;
       const controller = new AbortController();
       current = { key: job.key, controller };
       const claim = db.transaction('downloadQueue', 'readwrite');
