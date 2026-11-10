@@ -32,14 +32,14 @@ export async function pushChanges(client: Client, userId: string, changes: SyncC
   await client.batch(statements, 'write');
 }
 
-export async function pullChanges(client: Client, userId: string, cursor: number) {
+export async function pullChanges(client: Client, userId: string, cursor: number, includePreferences = true) {
   const [clock, result] = await client.batch([
     { sql: 'SELECT revision FROM mihon_sync_clock WHERE user_id=?', args: [userId] },
     { sql: `WITH candidates AS (SELECT store,record_key,data,deleted,client_clock,device_id,revision
-      FROM mihon_sync_records WHERE user_id=? AND revision>? ORDER BY revision LIMIT 1000),
+      FROM mihon_sync_records WHERE user_id=? AND revision>? AND (? OR store<>'libraryPreferences') ORDER BY revision LIMIT 1000),
       page AS (SELECT *, SUM(length(CAST(COALESCE(data,'') AS BLOB))+3*length(CAST(record_key AS BLOB))+320) OVER (ORDER BY revision) AS page_bytes,
       ROW_NUMBER() OVER (ORDER BY revision) AS position FROM candidates)
-      SELECT store,record_key,data,deleted,client_clock,device_id,revision FROM page WHERE page_bytes<=1048576 OR position=1 ORDER BY revision`, args: [userId, cursor] },
+      SELECT store,record_key,data,deleted,client_clock,device_id,revision FROM page WHERE page_bytes<=1048576 OR position=1 ORDER BY revision`, args: [userId, cursor, Number(includePreferences)] },
   ], 'read');
   const changes: RemoteChange[] = result.rows.map(row => ({
     id: String(row.store) + '\u0000' + String(row.record_key), store: String(row.store) as RemoteChange['store'], key: String(row.record_key),

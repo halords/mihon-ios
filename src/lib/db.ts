@@ -1,9 +1,9 @@
-import { openDB } from 'idb';
+import { openDB, unwrap } from 'idb';
 import type { DBSchema, IDBPDatabase } from 'idb';
 import { CATEGORIES, chapterKey, compareChapters, mangaKey } from '../sources/Source';
 import type { SChapter, SManga } from '../sources/Source';
-import type { ReaderMode, Settings } from './settings';
-import { loadSettings, saveSettings } from './settings';
+import type { ReaderMode, Settings, LibraryArrangement } from './settings';
+import { libraryArrangement, loadSettings, saveSettings } from './settings';
 import { fromBase64, toBase64, blobPart } from './bytes';
 import { trackSyncWrites } from './syncStorage';
 import type { DeviceProfile, SyncRecord } from './syncTypes';
@@ -137,6 +137,7 @@ export interface InstalledPluginRecord {
 }
 
 export interface MihonDB extends DBSchema {
+  libraryPreferences: { key: string; value: LibraryArrangement & { key: string } };
   syncRecords: { key: string; value: SyncRecord };
   syncControl: { key: string; value: MetadataRecord };
   syncProfiles: { key: string; value: DeviceProfile };
@@ -183,7 +184,7 @@ let databasePromise: Promise<IDBPDatabase<MihonDB>> | undefined;
 
 export async function getRawDB(): Promise<IDBPDatabase<MihonDB>> {
   if (!databasePromise) {
-    databasePromise = openDB<MihonDB>('mihon-pwa', 5, {
+    databasePromise = openDB<MihonDB>('mihon-pwa', 6, {
       upgrade(db, oldVersion, _nextVersion, tx) {
         if (oldVersion < 1) {
           db.createObjectStore('manga', { keyPath: 'key' });
@@ -223,6 +224,10 @@ export async function getRawDB(): Promise<IDBPDatabase<MihonDB>> {
           db.createObjectStore('syncRecords', { keyPath: 'id' });
           db.createObjectStore('syncControl', { keyPath: 'key' });
           db.createObjectStore('syncProfiles', { keyPath: 'key' });
+        }
+        if (oldVersion < 6) {
+          const preferences = db.createObjectStore('libraryPreferences', { keyPath: 'key' });
+          unwrap(preferences).put({ key: 'arrangement', ...libraryArrangement() });
         }
       },
       blocked() { dispatchDataEvent('mihon:database-blocked'); },

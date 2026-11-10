@@ -1,4 +1,4 @@
-export const SYNC_STORES = ['manga', 'chapterMeta', 'chapterState', 'library', 'history', 'categories'] as const;
+export const SYNC_STORES = ['manga', 'chapterMeta', 'chapterState', 'library', 'history', 'categories', 'libraryPreferences'] as const;
 export type SyncStore = typeof SYNC_STORES[number];
 export interface SyncChange {
   id: string; store: SyncStore; key: string; clock: number; deviceId: string;
@@ -38,6 +38,9 @@ export function validChange(value: unknown): value is SyncChange {
   if (value.deleted) return value.data === null;
   const data = value.data;
   if (!object(data) || canonical(data).length > 128 * 1024) return false;
+  if (value.store === 'libraryPreferences') return value.key === 'arrangement' && data.key === value.key &&
+    ['grid', 'list'].includes(String(data.libraryView)) && ['title', 'added', 'read', 'unread', 'updated', 'chapters', 'latest', 'fetched', 'random'].includes(String(data.librarySort)) &&
+    ['ascending', 'descending'].includes(String(data.librarySortDirection)) && Number.isSafeInteger(data.libraryRandomSeed);
   if (value.store === 'categories') return data.id === value.key && typeof data.name === 'string' && !!data.name.trim() && Number.isFinite(data.order);
   if (data.key !== value.key) return false;
   if (value.store === 'manga') return object(data.manga) && typeof data.manga.id === 'string' && typeof data.manga.sourceId === 'string' &&

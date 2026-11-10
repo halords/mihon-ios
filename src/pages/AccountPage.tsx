@@ -31,7 +31,7 @@ export default function AccountPage() {
       <section className="settings-card account-status-card">
         <span className="account-email"><Icon name="account" size={19} />{account.user.email}</span>
         <div className="account-sync-status" role="status"><span className={`status-dot ${account.status === 'ready' ? 'online' : ''}`} /><strong>{status}</strong></div>
-        <p className="muted">{account.pending ? `${account.pending} changes waiting to sync.` : 'Library, categories, progress, bookmarks and reading history.'}</p>
+        <p className="muted">{account.pending ? `${account.pending} changes waiting to sync.` : 'Library, arrangement, categories, reading position, bookmarks and history.'}</p>
         <p className="account-sync-time">{account.lastSync ? `Last synced ${new Date(account.lastSync).toLocaleString()}` : 'Your first sync is getting ready.'}</p>
         {account.error && <p className="account-sync-error">{account.error}</p>}
         <button className="btn wide" disabled={!online || busy || account.status === 'syncing'} onClick={() => void run(syncAccount)}><Icon name="refresh" size={18} />{account.status === 'syncing' ? 'Syncing…' : 'Sync now'}</button>
@@ -44,10 +44,10 @@ export default function AccountPage() {
     </> : account.configured && <>
       <section className="settings-card account-form-card"><h3>{mode === 'register' ? 'Create your account' : mode === 'recover' ? 'Recover your account' : 'Welcome back'}</h3>
         <form onSubmit={submit}>
-          <label className="field-label">Email<input type="email" autoComplete="email" required value={email} onChange={event => setEmail(event.target.value)} /></label>
+          <label className="field-label">Username or email<input type="text" autoComplete="username" autoCapitalize="none" spellCheck={false} required value={email} onChange={event => setEmail(event.target.value)} /></label>
           {mode === 'recover' && <label className="field-label">Recovery code<input autoComplete="off" required value={recovery} onChange={event => setRecovery(event.target.value)} /></label>}
-          <label className="field-label">{mode === 'recover' ? 'New password' : 'Password'}<input type="password" autoComplete={mode === 'login' ? 'current-password' : 'new-password'} minLength={12} maxLength={256} required value={password} onChange={event => setPassword(event.target.value)} /></label>
-          {mode !== 'login' && <p className="muted account-password-note">Use at least 12 characters.</p>}
+          <label className="field-label">{mode === 'recover' ? 'New password' : 'Password'}<input type="password" autoComplete={mode === 'login' ? 'current-password' : 'new-password'} minLength={8} maxLength={256} required value={password} onChange={event => setPassword(event.target.value)} /></label>
+          {mode !== 'login' && <p className="muted account-password-note">Use at least 8 characters.</p>}
           <button className="btn wide" disabled={busy || !online}>{busy ? 'Connecting…' : mode === 'register' ? 'Create account & sync' : mode === 'recover' ? 'Reset password' : 'Sign in'}</button>
         </form>
         <button className="text-btn wide" onClick={() => { setMode(mode === 'login' ? 'register' : 'login'); setError(''); }}>{mode === 'login' ? 'Create an account' : 'Back to sign in'}</button>

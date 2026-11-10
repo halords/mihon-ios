@@ -75,7 +75,7 @@ export async function trackSyncWrites(db: IDBPDatabase<MihonDB>): Promise<IDBPDa
           const previous = await target.get(key);
           const data = projectSyncData(name as SyncStore, value);
           const result = await target[property](value as never, keyArg as never);
-          if (!previous || canonical(projectSyncData(name as SyncStore, previous as unknown as Record<string, unknown>)) !== canonical(data)) await journal(key, data);
+          if (!previous || canonical(projectSyncData(name as SyncStore, previous as unknown as Record<string, unknown>)) !== canonical(data) || !await tx.objectStore('syncRecords').get(syncId(name, key))) await journal(key, data);
           return result;
         };
         if (property === 'delete') return async (key: IDBValidKey) => { await ready; await target.delete(key as never); await journal(String(key), null); };

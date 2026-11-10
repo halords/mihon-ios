@@ -3,6 +3,7 @@ import { getDB, getRawDB, putManga, addToLibrary, removeFromLibrary, patchChapte
 import { acknowledgeChanges, activateAccountProfile, applyRemoteChanges } from '../src/lib/account';
 import { setSyncProfileContext, syncNativeStore } from '../src/lib/syncStorage';
 import { syncId, type RemoteChange } from '../src/lib/syncTypes';
+import { libraryArrangement, loadSettings, saveSettings } from '../src/lib/settings';
 beforeEach(() => setSyncProfileContext('guest'));
 const key = 'mangadex::hero'; const chapter = key + '::one';
 async function seed() { await putManga({ id: 'hero', sourceId: 'mangadex', title: 'Hero', coverUrl: '', genres: [], description: '', status: 'Ongoing' }); await addToLibrary(key, 'Reading'); }
@@ -34,10 +35,24 @@ it('keeps writes made during upload pending and applies newer remote states with
   await patchChapterState(chapter, key, { read: false, lastPage: 0 });
   await acknowledgeChanges([sent], 'user-a'); expect((await db.get('syncRecords', sent.id))?.pending).toBe(true);
   const current = (await db.get('syncRecords', sent.id))!;
-  const remote: RemoteChange = { ...current, clock: current.clock + 1, deviceId: 'other-device', revision: 20, data: { ...current.data, read: true, lastPage: 9 } };
+  const remote: RemoteChange = { ...current, clock: current.clock + 1, deviceId: 'other-device', revision: 20, data: { ...current.data, read: false, lastPage: 9, pageOffset: 0.35 } };
   await applyRemoteChanges([remote], 20, 'user-a');
-  expect(await getChapterState(chapter)).toMatchObject({ read: true, lastPage: 9, downloaded: true });
+  expect(await getChapterState(chapter)).toMatchObject({ read: false, lastPage: 9, pageOffset: 0.35, downloaded: true });
   expect((await db.get('syncRecords', sent.id))?.pending).toBe(false);
+});
+it('restores cloud arrangement without syncing device settings and retains arrangement in account profiles', async () => {
+  await activateAccountProfile('user-a');
+  const db = await getDB(); const raw = await getRawDB();
+  const data = { key: 'arrangement', librarySort: 'title' as const, librarySortDirection: 'ascending' as const, libraryView: 'list' as const, libraryRandomSeed: 27 };
+  await db.put('libraryPreferences', data);
+  const local = (await raw.get('syncRecords', syncId('libraryPreferences', 'arrangement')))!;
+  saveSettings({ theme: 'light', suwayomiUrl: 'https://device.example' });
+  await applyRemoteChanges([{ ...local, clock: local.clock + 1, deviceId: 'other', revision: 1, data }], 1, 'user-a');
+  expect(libraryArrangement(loadSettings())).toMatchObject({ librarySort: 'title', librarySortDirection: 'ascending', libraryView: 'list', libraryRandomSeed: 27 });
+  expect(loadSettings()).toMatchObject({ theme: 'light', suwayomiUrl: 'https://device.example' });
+  expect((await raw.get('syncRecords', local.id))!.pending).toBe(false);
+  await activateAccountProfile('user-b'); expect(loadSettings().librarySort).toBe('read');
+  await activateAccountProfile('user-a'); expect(loadSettings().librarySort).toBe('title');
 });
 it('separates account profiles and rejects a remote page for the wrong active account', async () => {
   await seed(); await activateAccountProfile('user-a'); expect(await getLibrary()).toHaveLength(0);

@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, expect, it } from 'vitest';
 import { createServer, type Server } from 'node:http';
+import { scryptSync } from 'node:crypto';
 import { createClient, type Client } from '@libsql/client';
 import { createAccountHandler } from '../server/account';
 import { pushChanges, pullChanges } from '../server/accountDatabase';
@@ -15,7 +16,7 @@ beforeEach(async () => {
 afterEach(async () => { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); client.close(); });
 async function call(action: string, input?: unknown, cookie = '', id?: string, externalOrigin?: string) {
   const response = await fetch(origin + '/api/account?action=' + action, { method: input === undefined ? 'GET' : 'POST', headers: {
-    'X-Mihon-Request': '1', 'Content-Type': 'application/json', Origin: externalOrigin ?? origin, Cookie: cookie, ...(id ? { 'X-Mihon-Account': id } : {}),
+    'X-Mihon-Request': '1', 'X-Mihon-Sync-Version': '2', 'Content-Type': 'application/json', Origin: externalOrigin ?? origin, Cookie: cookie, ...(id ? { 'X-Mihon-Account': id } : {}),
   }, ...(input !== undefined ? { body: JSON.stringify(input) } : {}) });
   return { status: response.status, data: await response.json(), cookie: response.headers.get('set-cookie')?.split(';')[0] ?? '', cookieHeader: response.headers.get('set-cookie') ?? '' };
 }
@@ -25,12 +26,49 @@ const library = (clock = 100, deleted = false): SyncChange => ({ id: syncId('lib
 it('creates hashed-password accounts, uses an HttpOnly session, and revokes it on sign-out', async () => {
   const created = await register(); expect(created.status).toBe(200); expect(created.cookieHeader).toContain('HttpOnly'); expect(created.cookieHeader).toContain('SameSite=Lax');
   const rows = (await client.execute('SELECT * FROM mihon_users')).rows;
+  expect(rows[0]?.password_hash).toMatch(/^\$argon2id\$v=19\$m=65536,t=3,p=1\$/);
   expect(rows[0]?.password_hash).not.toContain('correct horse'); expect(rows[0]?.recovery_hash).not.toBe(created.data.recoveryCode);
   expect((await call('status', undefined, created.cookie)).data.user.email).toBe('reader@example.com');
   expect((await call('login', { email: 'reader@example.com', password: 'wrong password' })).status).toBe(401);
   expect((await call('login', { email: 'READER@example.com', password: 'correct horse battery staple' })).status).toBe(200);
   expect((await call('logout', {}, created.cookie, created.data.user.id)).status).toBe(200);
   expect((await call('status', undefined, created.cookie)).data.user).toBeNull();
+});
+it('uses unique Argon2id salts and upgrades existing scrypt accounts only after a valid login', async () => {
+  const a = await register('a@example.com'); const b = await register('b@example.com');
+  const rows = (await client.execute('SELECT password_hash FROM mihon_users ORDER BY email')).rows;
+  expect(rows[0]!.password_hash).not.toBe(rows[1]!.password_hash);
+  const salt = '0123456789abcdef0123456789abcdef';
+  const legacy = salt + ':' + scryptSync('correct horse battery staple', salt, 64).toString('hex');
+  await client.execute({ sql: 'UPDATE mihon_users SET password_hash=? WHERE id=?', args: [legacy, a.data.user.id] });
+  expect((await call('login', { email: 'a@example.com', password: 'wrong password' })).status).toBe(401);
+  expect((await client.execute({ sql: 'SELECT password_hash FROM mihon_users WHERE id=?', args: [a.data.user.id] })).rows[0]!.password_hash).toBe(legacy);
+  expect((await call('login', { email: 'a@example.com', password: 'correct horse battery staple' })).status).toBe(200);
+  expect((await client.execute({ sql: 'SELECT password_hash FROM mihon_users WHERE id=?', args: [a.data.user.id] })).rows[0]!.password_hash).toMatch(/^\$argon2id\$/);
+  expect((await call('status', undefined, b.cookie)).data.user.id).toBe(b.data.user.id);
+});
+it('supports usernames and keeps sessions valid until explicit revocation', async () => {
+  const created = await call('register', { username: 'reader_fixture', password: 'fixture01' });
+  expect(created.status).toBe(200); expect(created.data.hasSyncedData).toBe(false);
+  expect(created.cookieHeader).toContain('Max-Age=34560000');
+  await client.execute('UPDATE mihon_sessions SET expires_at=1');
+  const resumed = await call('status', undefined, created.cookie);
+  expect(resumed.data.user.email).toBe('reader_fixture'); expect(resumed.cookie).toBe(created.cookie);
+  expect((await call('login', { username: 'READER_FIXTURE', password: 'fixture01' })).status).toBe(200);
+  expect((await call('status', undefined, created.cookie)).data.user).not.toBeNull();
+  await call('logout', {}, created.cookie, created.data.user.id);
+  expect((await call('status', undefined, created.cookie)).data.user).toBeNull();
+});
+it('syncs arrangement to supported clients while older clients can still read their library', async () => {
+  const created = await register(); const id = created.data.user.id;
+  const preferences: SyncChange = { id: syncId('libraryPreferences', 'arrangement'), store: 'libraryPreferences', key: 'arrangement', clock: 101,
+    deviceId: 'device-a', deleted: false, data: { key: 'arrangement', librarySort: 'title', librarySortDirection: 'ascending', libraryView: 'list', libraryRandomSeed: 10 } };
+  expect((await call('push', { changes: [library(), preferences] }, created.cookie, id)).status).toBe(200);
+  expect((await call('pull&cursor=0', undefined, created.cookie, id)).data.changes).toHaveLength(2);
+  const old = await pullChanges(client, id, 0, false);
+  expect(old.changes).toHaveLength(1); expect(old.changes[0]!.store).toBe('library');
+  expect((await pullChanges(client, id, old.cursor, false)).hasMore).toBe(false);
+  expect((await call('login', { email: 'reader@example.com', password: 'correct horse battery staple' })).data.hasSyncedData).toBe(true);
 });
 it('rejects cross-origin writes, invalid data, cross-account headers and unauthenticated sync', async () => {
   const created = await register();
@@ -62,6 +100,7 @@ it('recovers an account with its one-time code, rotates the code, and revokes ol
   const created = await register();
   const recovered = await call('recover', { email: 'reader@example.com', password: 'my replacement password', recoveryCode: created.data.recoveryCode });
   expect(recovered.status).toBe(200); expect(recovered.data.recoveryCode).not.toBe(created.data.recoveryCode);
+  expect((await client.execute('SELECT password_hash FROM mihon_users')).rows[0]!.password_hash).toMatch(/^\$argon2id\$/);
   expect((await call('status', undefined, created.cookie)).data.user).toBeNull();
   expect((await call('recover', { email: 'reader@example.com', password: 'yet another password', recoveryCode: created.data.recoveryCode })).status).toBe(401);
   expect((await call('login', { email: 'reader@example.com', password: 'my replacement password' })).status).toBe(200);

@@ -20,7 +20,7 @@ async function auth(page: Page, email: string, register = false) {
   await page.goto('/#/account');
   await expect(page.getByRole('heading', { name: 'Welcome back' })).toBeVisible();
   if (register) await page.getByRole('button', { name: 'Create an account', exact: true }).click();
-  await page.getByLabel('Email', { exact: true }).fill(email);
+  await page.getByLabel('Username or email', { exact: true }).fill(email);
   await page.getByLabel('Password', { exact: true }).fill('a strong fixture password');
   await page.getByRole('button', { name: register ? 'Create account & sync' : 'Sign in', exact: true }).click();
   await expect(page.getByText(email, { exact: true })).toBeVisible();
@@ -87,4 +87,42 @@ test('keeps accounts isolated and retains each account on the device after signi
   expect(await local(page, 'library')).toHaveLength(1); expect(await local(page, 'history')).toHaveLength(1);
   await page.getByRole('button', { name: 'Import & export', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Export PWA library (.json)', exact: true })).toBeVisible();
+});
+
+test('adds a device library on first login and restores its arrangement and unfinished reading position', async ({ page, browser, request }, info) => {
+  const username = `reader_${info.project.name.replaceAll('-', '_')}_${crypto.randomUUID().slice(0, 8)}`;
+  const created = await request.post('/api/account?action=register', {
+    headers: { 'X-Mihon-Request': '1' }, data: { username, password: 'a strong fixture password' },
+  });
+  expect(created.ok()).toBe(true); expect((await created.json()).hasSyncedData).toBe(false);
+  await seedDevice(page);
+  await page.evaluate(async () => {
+    const db = await new Promise<IDBDatabase>(resolve => { const request = indexedDB.open('mihon-pwa'); request.onsuccess = () => resolve(request.result); });
+    const tx = db.transaction(['chapterState', 'categories'], 'readwrite');
+    const key = 'mangadex::sync-hero::chapter-1';
+    tx.objectStore('chapterState').put({ key, mangaKey: 'mangadex::sync-hero', read: false, lastPage: 8, pageOffset: 0.35, downloaded: false, bookmark: true });
+    tx.objectStore('categories').put({ id: 'category:Reading', name: 'Reading', order: 0 });
+    tx.objectStore('categories').put({ id: 'category:Default', name: 'Default', order: 1 });
+    await new Promise<void>(resolve => { tx.oncomplete = () => resolve(); }); db.close();
+  });
+  await page.getByRole('button', { name: 'Sort library', exact: true }).click();
+  await page.getByLabel('Sort library by').selectOption('title');
+  await page.getByLabel('Library sort order').selectOption('ascending');
+  await page.getByRole('button', { name: 'Done', exact: true }).click();
+  await page.getByRole('button', { name: 'Filter and sort library', exact: true }).click();
+  await page.getByRole('combobox', { name: 'Display', exact: true }).selectOption('list');
+  await page.getByRole('button', { name: 'Done', exact: true }).click();
+  await auth(page, username);
+  expect(await local(page, 'library')).toHaveLength(1);
+  const secondContext = await browser.newContext({ baseURL: new URL(page.url()).origin, viewport: { width: 390, height: 844 }, serviceWorkers: 'allow' });
+  try {
+    const second = await secondContext.newPage(); await auth(second, username);
+    expect(await local(second, 'chapterState')).toMatchObject([{ read: false, lastPage: 8, pageOffset: 0.35 }]);
+    await expect.poll(() => second.evaluate(() => JSON.parse(localStorage.getItem('mihon-settings')!))).toMatchObject({ librarySort: 'title', librarySortDirection: 'ascending', libraryView: 'list' });
+    await second.reload(); await expect(second.getByText(username, { exact: true })).toBeVisible();
+    await second.goto('/#/library');
+    await expect(second.locator('.continue-card')).toContainText('Page 9');
+    await expect(second.locator('.category-tab').nth(1)).toContainText('Reading');
+    await expect(second.getByRole('button', { name: 'Open Synced Hero', exact: true })).toBeVisible();
+  } finally { await secondContext.close(); }
 });

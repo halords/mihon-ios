@@ -1,8 +1,9 @@
 import { useSyncExternalStore } from 'react';
 import { unwrap } from 'idb';
-import { getRawDB, importData, dispatchDataEvent, type BackupData } from './db';
+import { getDB, getRawDB, importData, dispatchDataEvent, type BackupData } from './db';
 import { newer, PROFILE_STORES, validChange, type AccountUser, type DeviceProfile, type RemoteChange, type SyncRecord } from './syncTypes';
 import { observeSyncClock, setSyncProfileContext } from './syncStorage';
+import { DEFAULT_SETTINGS, libraryArrangement, onLibraryArrangementChange, saveSettings, type LibraryArrangement } from './settings';
 
 export interface AccountState {
   configured: boolean | null; user: AccountUser | null;
@@ -20,10 +21,21 @@ let timer: ReturnType<typeof setTimeout> | undefined;
 let sessionVerified = false;
 let generation = 0;
 let channel: BroadcastChannel | undefined;
+let preferencesWrite = Promise.resolve();
+async function restoreLibraryArrangement(): Promise<void> {
+  const preferences = await (await getRawDB()).get('libraryPreferences', 'arrangement');
+  saveSettings(preferences ? libraryArrangement(preferences) : libraryArrangement(DEFAULT_SETTINGS), { syncLibrary: false });
+}
+function saveLibraryArrangement(arrangement: LibraryArrangement): void {
+  preferencesWrite = preferencesWrite.catch(() => {}).then(async () => {
+    await (await getDB()).put('libraryPreferences', { key: 'arrangement', ...arrangement });
+  });
+  void preferencesWrite.catch(error => publish({ error: error instanceof Error ? error.message : 'Unable to save library arrangement for sync.' }));
+}
 
 class SessionError extends Error {}
 async function request(action: string, input?: unknown, accountId?: string) {
-  const headers: Record<string, string> = { 'X-Mihon-Request': '1' };
+  const headers: Record<string, string> = { 'X-Mihon-Request': '1', 'X-Mihon-Sync-Version': '2' };
   if (input !== undefined) headers['Content-Type'] = 'application/json';
   if (accountId) headers['X-Mihon-Account'] = accountId;
   const response = await fetch('/api/account?action=' + action, { method: input === undefined ? 'GET' : 'POST', credentials: 'same-origin', cache: 'no-store', headers, ...(input !== undefined ? { body: JSON.stringify(input) } : {}), signal: AbortSignal.timeout(30000) });
@@ -45,6 +57,7 @@ export async function activateAccountProfile(userId: string): Promise<void> {
   if (owner === userId) { setSyncProfileContext(userId); await tx.done; return; }
   const stores: DeviceProfile['stores'] = {};
   await Promise.all(PROFILE_STORES.map(async store => { stores[store] = await tx.objectStore(store).getAll(); }));
+  stores.libraryPreferences = [{ key: 'arrangement', ...libraryArrangement() }];
   const profile: DeviceProfile = { key: owner, stores, records: await tx.objectStore('syncRecords').getAll(),
     cursor: Number((await tx.objectStore('syncControl').get('cursor'))?.value ?? 0), clock: Number((await tx.objectStore('syncControl').get('clock'))?.value ?? 0), lastSync: Number((await tx.objectStore('syncControl').get('lastSync'))?.value ?? 0) };
   await tx.objectStore('syncProfiles').put(profile);
@@ -58,6 +71,7 @@ export async function activateAccountProfile(userId: string): Promise<void> {
   for (const [key, value] of Object.entries({ owner: userId, cursor: next?.cursor ?? 0, clock: next?.clock ?? 0, lastSync: next?.lastSync ?? 0 })) await tx.objectStore('syncControl').put({ key, value });
   await tx.done;
   observeSyncClock(next?.clock ?? 0); setSyncProfileContext(userId);
+  await restoreLibraryArrangement();
   dispatchDataEvent(); dispatchDataEvent('mihon:downloads-changed');
   channel?.postMessage({ type: 'profile', userId });
 }
@@ -96,6 +110,7 @@ export async function applyRemoteChanges(changes: RemoteChange[], cursor: number
   await tx.objectStore('syncControl').put({ key: 'clock', value: clock });
   await tx.objectStore('syncControl').put({ key: 'cursor', value: cursor });
   await tx.done; observeSyncClock(clock);
+  if (changes.some(change => change.store === 'libraryPreferences')) await restoreLibraryArrangement();
   if (changes.length) dispatchDataEvent();
 }
 
@@ -146,6 +161,10 @@ async function cycle(): Promise<void> {
       cursor = result.cursor;
       if (!result.hasMore) break;
     }
+    if (!await db.get('syncRecords', 'libraryPreferences\u0000arrangement')) {
+      const preferences = await db.get('libraryPreferences', 'arrangement');
+      await (await getDB()).put('libraryPreferences', preferences ?? { key: 'arrangement', ...libraryArrangement() });
+    }
     await db.put('syncControl', { key: 'lastSync', value: Date.now() });
     await summary(); publish({ status: 'ready' });
     if (state.pending) schedule();
@@ -163,6 +182,11 @@ export async function addDeviceLibrary(): Promise<void> {
   const data: BackupData = { version: 2, exportedAt: Date.now(), manga: [], chapterMeta: [], chapterState: [], library: [], history: [], downloads: [], categories: [] };
   for (const store of ['manga', 'chapterMeta', 'chapterState', 'library', 'history', 'categories', 'downloads'] as const) (data[store] as unknown[]) = guest.stores[store] ?? [];
   await importData(data);
+  const arrangement = guest.stores.libraryPreferences?.[0] as (LibraryArrangement & { key: string }) | undefined;
+  if (arrangement) {
+    await (await getDB()).put('libraryPreferences', { key: 'arrangement', ...libraryArrangement(arrangement) });
+    await restoreLibraryArrangement();
+  }
   // Original archives and local downloads remain useful after connecting an
   // account, but are never sent to the cloud sync endpoint.
   const tx = db.transaction(['archives', 'metadata', 'backendBindings', 'downloadQueue', 'syncProfiles'], 'readwrite');
@@ -182,6 +206,7 @@ export async function addDeviceLibrary(): Promise<void> {
 async function connect(user: AccountUser): Promise<void> {
   generation++; sessionVerified = false;
   if (running) await running;
+  await preferencesWrite.catch(() => {});
   // Stop a foreground download before switching its database profile.
   const db = await getRawDB();
   const switching = String((await db.get('syncControl', 'owner'))?.value ?? 'guest') !== user.id;
@@ -199,7 +224,9 @@ async function connect(user: AccountUser): Promise<void> {
 }
 export async function signInAccount(email: string, password: string): Promise<void> {
   const result = await request('login', { email, password });
-  await connect(result.user); publish({ recoveryCode: '' }); await syncAccount();
+  await connect(result.user); publish({ recoveryCode: '' });
+  if (result.hasSyncedData === false) await addDeviceLibrary();
+  await syncAccount();
 }
 export async function createAccount(email: string, password: string): Promise<void> {
   const result = await request('register', { email, password });
@@ -214,6 +241,7 @@ export async function signOutAccount(): Promise<void> {
   if (!navigator.onLine) throw new Error('Connect to the internet to sign out securely.');
   generation++;
   if (running) await running;
+  await preferencesWrite.catch(() => {});
   const id = state.user?.id;
   await request('logout', {}, id);
   sessionVerified = false; cacheUser(null);
@@ -236,6 +264,8 @@ export function initAccount(): Promise<void> {
     const db = await getRawDB();
     setSyncProfileContext(String((await db.get('syncControl', 'owner'))?.value ?? 'guest'));
     observeSyncClock(Number((await db.get('syncControl', 'clock'))?.value ?? 0));
+    await restoreLibraryArrangement();
+    onLibraryArrangementChange(saveLibraryArrangement);
     try { const cached = JSON.parse(localStorage.getItem('mihon-account') ?? 'null'); if (cached?.id && cached?.email) publish({ user: cached }); } catch { /* First use. */ }
     if (typeof BroadcastChannel !== 'undefined') {
       channel = new BroadcastChannel('mihon-account');

@@ -19,6 +19,7 @@ export interface Settings {
   suwayomiUrl: string;
   chapterLanguages: string[];
 }
+export type LibraryArrangement = Pick<Settings, 'libraryView' | 'librarySort' | 'librarySortDirection' | 'libraryRandomSeed'>;
 
 export const DEFAULT_SETTINGS: Settings = {
   readerMode: 'vertical',
@@ -39,6 +40,13 @@ export const DEFAULT_SETTINGS: Settings = {
 
 const STORAGE_KEY = 'mihon-settings';
 const listeners = new Set<(settings: Settings) => void>();
+const libraryListeners = new Set<(arrangement: LibraryArrangement) => void>();
+export function libraryArrangement(settings: LibraryArrangement = loadSettings()): LibraryArrangement {
+  return { libraryView: settings.libraryView, librarySort: settings.librarySort, librarySortDirection: settings.librarySortDirection, libraryRandomSeed: settings.libraryRandomSeed };
+}
+export function onLibraryArrangementChange(fn: (arrangement: LibraryArrangement) => void): () => void {
+  libraryListeners.add(fn); return () => { libraryListeners.delete(fn); };
+}
 
 function normalizeSettings(value: unknown): Settings {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
@@ -112,8 +120,9 @@ export function loadSettings(): Settings {
   }
 }
 
-export function saveSettings(patch: Partial<Settings>): Settings {
-  const settings = normalizeSettings({ ...loadSettings(), ...patch });
+export function saveSettings(patch: Partial<Settings>, options: { syncLibrary?: boolean } = {}): Settings {
+  const previous = loadSettings();
+  const settings = normalizeSettings({ ...previous, ...patch });
 
   if (typeof window !== 'undefined') {
     try {
@@ -133,6 +142,9 @@ export function saveSettings(patch: Partial<Settings>): Settings {
 
   for (const listener of [...listeners]) {
     listener(settings);
+  }
+  if (options.syncLibrary !== false && JSON.stringify(libraryArrangement(previous)) !== JSON.stringify(libraryArrangement(settings))) {
+    for (const listener of [...libraryListeners]) listener(libraryArrangement(settings));
   }
 
   return settings;
