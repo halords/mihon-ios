@@ -7,6 +7,7 @@ import { useOnline, useSettings } from '../lib/hooks';
 import { saveSettings, type ReaderMode } from '../lib/settings';
 import { chapterKey, splitMangaKey, type SChapter, type SManga, type MangaPage } from '../sources/Source';
 import { getSource } from '../sources';
+import { fetchImage } from '../lib/fetchJson';
 import Icon from '../components/Icon';
 import Sheet from '../components/Sheet';
 import { toast } from '../components/Feedback';
@@ -30,22 +31,28 @@ export async function loadReaderPages(mangaKey: string, chapterId: string, signa
 function PageImage({ page, index, eager, paged, fit, onLoad }: { page: MangaPage; index: number; eager?: boolean; paged?: boolean; fit?: 'width' | 'screen'; onLoad: () => void }) {
   const [failed, setFailed] = useState(false);
   const [attempt, setAttempt] = useState(0);
-  const [src, setSrc] = useState(page.cachedKey ? '' : page.imageUrl);
+  const needsDecode = page.imageUrl.includes('#tiles=');
+  const [src, setSrc] = useState(page.cachedKey || needsDecode ? '' : page.imageUrl);
   const [size, setSize] = useState({ width: page.width ?? 800, height: page.height ?? 1200 });
   const element = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    if (!page.cachedKey) return;
+    if (!page.cachedKey && !needsDecode) return;
     let alive = true;
     let objectUrl = '';
     let request = 0;
+    let controller: AbortController | undefined;
     async function activate(visible: boolean) {
       const token = ++request;
-      if (!visible) { if (objectUrl) URL.revokeObjectURL(objectUrl); objectUrl = ''; setSrc(''); return; }
+      if (!visible) { controller?.abort(); if (objectUrl) URL.revokeObjectURL(objectUrl); objectUrl = ''; setSrc(''); return; }
       if (objectUrl) return;
       try {
-        const response = await (await caches.open(PAGES_CACHE)).match(page.cachedKey!);
-        if (!response) throw new Error('Downloaded page is missing');
-        const blob = await response.blob();
+        controller?.abort(); controller = new AbortController();
+        let blob: Blob;
+        if (page.cachedKey) {
+          const response = await (await caches.open(PAGES_CACHE)).match(page.cachedKey);
+          if (!response) throw new Error('Downloaded page is missing');
+          blob = await response.blob();
+        } else blob = await fetchImage(page.imageUrl, controller.signal);
         if (!alive || token !== request) return;
         objectUrl = URL.createObjectURL(blob); setSrc(objectUrl);
       } catch { if (alive && token === request) setFailed(true); }
@@ -54,8 +61,8 @@ function PageImage({ page, index, eager, paged, fit, onLoad }: { page: MangaPage
     const observer = new IntersectionObserver(entries => { void activate(paged || entries.some(e => e.isIntersecting) || !!eager && !page.width); }, { root: element.current?.closest('.reader-screen'), rootMargin: '1000px 0px' });
     if (element.current) observer.observe(element.current);
     if (paged) void activate(true);
-    return () => { alive = false; request++; observer.disconnect(); if (objectUrl) URL.revokeObjectURL(objectUrl); };
-  }, [page.cachedKey, paged, eager, attempt]);
+    return () => { alive = false; request++; controller?.abort(); observer.disconnect(); if (objectUrl) URL.revokeObjectURL(objectUrl); };
+  }, [page.cachedKey, page.imageUrl, page.width, needsDecode, paged, eager, attempt]);
   return <div ref={element} className={`reader-page ${paged ? `paged-page fit-${fit}` : ''}`} data-page={index} style={page.cachedKey && !paged ? { aspectRatio: `${size.width} / ${size.height}` } : undefined}>
     {failed ? <div className="page-error"><Icon name="cloud" size={30} /><p>Page {index + 1} could not load</p><button className="btn" onClick={event => { event.stopPropagation(); setFailed(false); setAttempt(a => a + 1); }}>Retry page</button></div> :
       src ? <img key={attempt} src={src} alt={`Page ${index + 1}`} width={size.width} height={size.height} loading={eager || paged ? 'eager' : 'lazy'} decoding="async" referrerPolicy="no-referrer" draggable={false} onLoad={event => { const img = event.currentTarget; setSize({ width: img.naturalWidth, height: img.naturalHeight }); requestAnimationFrame(onLoad); }} onError={() => setFailed(true)} /> : <div className="page-placeholder" aria-label={`Loading page ${index + 1}`} />}

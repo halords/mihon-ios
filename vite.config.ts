@@ -2,10 +2,12 @@ import { defineConfig, loadEnv, type Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
 import { VitePWA } from 'vite-plugin-pwa';
 import { handleMangaDexProxy, handleSuwayomiProxy } from './server/proxy.ts';
+import { handleSourceProxy } from './server/sourceProxy.ts';
 
 function sourceProxy(): Plugin {
   const middleware = (req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse, next: (error?: unknown) => void): void => {
       if (req.url?.startsWith('/api/proxy?')) void handleMangaDexProxy(req, res).catch(next);
+      else if (req.url?.startsWith('/api/source?')) void handleSourceProxy(req, res).catch(next);
       else if (req.url?.startsWith('/api/suwayomi/')) void handleSuwayomiProxy(req, res).catch(next);
       else next();
     };

@@ -1,6 +1,18 @@
 # Mihon iOS PWA — implementation state
 
-Updated 2026-11-10. The current task adds visible library sorting, Mihon extension management in Browse and current-state `.tachibk` export, using the user's APK and original backup as references. The user authorized committing and pushing the verified changes to GitHub. Deployment status has not been verified.
+Updated 2026-11-10. The current task integrates web adapters for only the sources in the user's original `.tachibk`, so those sources no longer require a Suwayomi connection. Sorting, Android extension management and current-state `.tachibk` export remain implemented. The user authorized committing and pushing verified changes to GitHub. Deployment status has not been verified.
+
+## Built-in source adapter update
+
+- Browse includes nine original identities: MangaHub, Mangakakalot, Manhwa18.cc and its legacy ID, MangaDex, Asura Scans, MangaLife, MangaFox and Kissmanga.in. The demo source is no longer registered by default. Extensions opens the Built-in sources panel; optional Android/web extension management remains available.
+- Source logic runs in browser TypeScript. Same-origin `/api/source` requests use a narrow per-source HTTPS allowlist with redirect validation, small read-only GraphQL bodies, scoped public source headers, inert document parsing, response sandboxing, streaming and cancellation. Node, Vite dev/preview and Vercel share the route. No `SUWAYOMI_URL` is needed for built-ins.
+- Ports use Keiyoushi revision `1b7089818edf1e36bf71256369e4c6f36bbd9158`, with Apache-2.0 license/notices. MangaHub supports its public AES-GCM chapter format; Asura supports Astro data and public tile layouts. Subscription chapters remain external.
+- Refreshes retain chapter keys only for exact IDs or unique normalized URL/number matches within the same source/title, preserving reading state, bookmarks and cached downloads. Ambiguous releases remain separate. Mangakakalot verifies exact normalized title equality before resolving old opaque Manganato paths on its current official mirror.
+- Live checks passed browse, details, chapter list, page list and image bytes for Asura Scans, Mangakakalot and MangaFox. MangaHub's website/API and Kissmanga.in return HTTP 403 access blocks. Manhwa18.cc has certificate-chain failures. MangaLife has certificate failures or a redirect page without its old reader data. These are surfaced as source errors; the app does not bypass access controls or disable TLS verification.
+- Validation: **67 unit tests** in 15 files and **40 mobile browser tests** (20 Chromium, 20 WebKit) passed. Browser fixtures exercise all adapter formats, blocked-source errors, reconstructed Asura images and built-in offline downloads, plus all prior migration/reader/extension/export tests. Production build generated 25 precache entries (~559 KiB). Lint has existing warnings and no errors.
+- `docs/SOURCES.md`, updated README and `/help/sources.html` explain source status, hosting and migration. Personal backups, downloaded references and live verification artifacts remain Git-ignored.
+
+Physical iPhone behavior, all original library URLs and a deployed production host remain unverified. Installed adapters do not imply that every remote website is currently reachable. The older validation details below describe the prior sorting/Android-extension/export work.
 
 ## Objective and accepted constraints
 

@@ -1,5 +1,7 @@
 # Run Mihon-compatible sources on iOS
 
+The sources used by the supplied backup now have [built-in web adapters](SOURCES.md). Use **Browse → Sources** for those adapters; no Suwayomi connection or **Copy to server** is required. This guide covers the optional Android APK extension connection.
+
 Suwayomi executes compatible Android source extensions on a computer or server. The PWA uses those sources to discover chapters and fetch image bytes, then keeps completed downloads on the iPhone. You can disconnect the server while reading downloaded chapters.
 
 ## Docker setup

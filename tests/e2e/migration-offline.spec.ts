@@ -24,6 +24,13 @@ async function showControls(page: Page) {
 async function assertImage(page: Page, selector = '.reader-page img') {
   await expect.poll(async () => page.locator(selector).evaluateAll(images => images.some(image => (image as HTMLImageElement).complete && (image as HTMLImageElement).naturalWidth > 0))).toBe(true);
 }
+async function installDemo(page: Page) {
+  page.on('dialog', dialog => dialog.accept());
+  await page.goto('/#/extensions');
+  await page.getByRole('button', { name: 'Web extensions', exact: true }).click();
+  await page.getByRole('button', { name: 'Install', exact: true }).click();
+  await expect(page.locator('.chip').filter({ hasText: /^Installed$/ })).toBeVisible();
+}
 test('restores all Mihon metadata through preview and organizes multiple categories', async ({ page }, info) => {
   await restoreFixture(page);
   await page.getByRole('button', { name: 'Open library', exact: true }).click();
@@ -94,18 +101,19 @@ test('preserves scroll offsets inside the first page after an offline reload', a
   await expect(page.getByLabel('Seek to page')).toHaveValue('1');
 });
 test('downloads chapters from a source, persists its queue, and reads them offline', async ({ page, context }, info) => {
+  await installDemo(page);
   await page.goto('/#/browse');
   await page.getByRole('button', { name: 'Titles', exact: true }).click();
-  await page.getByLabel('Browse source').selectOption('sample');
-  await page.getByRole('button', { name: 'Open Starfall Blade' }).click();
+  await page.getByLabel('Browse source').selectOption('demo-extension');
+  await page.getByRole('button', { name: 'Open Ember Sea' }).click();
   await page.getByRole('button', { name: 'Add to library', exact: true }).click();
   await expect(page.getByRole('button', { name: 'In library', exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Download', exact: true }).click();
   await page.getByRole('button', { name: /Next 5 unread chapters/ }).click();
-  await expect(page.getByText('3 chapters available offline')).toBeVisible({ timeout: 30000 });
+  await expect(page.getByText('5 chapters available offline')).toBeVisible({ timeout: 30000 });
   await readyOffline(page);
   await page.getByRole('button', { name: 'Manage', exact: true }).click();
-  await expect(page.getByRole('button', { name: /Downloaded 3/ })).toBeVisible();
+  await expect(page.getByRole('button', { name: /Downloaded 5/ })).toBeVisible();
   await page.screenshot({ path: info.outputPath('download-manager.png'), fullPage: true });
   await context.setOffline(true);
   await page.reload();
@@ -114,12 +122,14 @@ test('downloads chapters from a source, persists its queue, and reads them offli
   expect(await page.locator('.reader-screen').evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
 });
 test('keeps working browse results when another source fails', async ({ page, context }) => {
+  await installDemo(page);
   await context.route('**/api/proxy?*', route => route.fulfill({ status: 502, contentType: 'application/json', body: '{"error":"Unavailable test source"}' }));
+  await context.route('**/api/source?*', route => route.fulfill({ status: 502, contentType: 'application/json', body: '{"error":"Unavailable test source"}' }));
   await page.goto('/#/browse');
   await page.getByRole('button', { name: 'Titles', exact: true }).click();
   await page.getByLabel('Browse source').selectOption('all');
-  await expect(page.getByRole('button', { name: 'Open Starfall Blade' })).toBeVisible();
-  await expect(page.getByRole('alert')).toContainText('HTTP 502');
+  await expect(page.getByRole('button', { name: 'Open Ember Sea' })).toBeVisible();
+  await expect(page.getByRole('alert').filter({ hasText: 'HTTP 502' }).first()).toBeVisible();
 });
 
 test('installs relative extension indexes and retains class methods and private state across offline restarts', async ({ page, context }, info) => {

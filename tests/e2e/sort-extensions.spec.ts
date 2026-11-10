@@ -36,6 +36,7 @@ test('shows available and missing library sources with stores retained from Andr
   await expect(page.getByRole('button', { name: /^Browse MangaDex/ })).toBeVisible();
   await expect(page.getByText('Exact ID source', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Extensions', exact: true }).click();
+  await page.getByRole('button', { name: 'Mihon extensions', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Connect to load Mihon extensions' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Add Extension store store', exact: true })).toBeDisabled();
   await page.screenshot({ path: info.outputPath('retained-extension-stores.png'), fullPage: true });
@@ -83,6 +84,7 @@ test('installs, updates, filters and uninstalls server extensions from Browse', 
   });
   await page.goto('/#/browse');
   await page.getByRole('button', { name: 'Extensions', exact: true }).click();
+  await page.getByRole('button', { name: 'Mihon extensions', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Extensions · 2' })).toBeVisible();
   await page.getByLabel('Extension store URL').fill(extension.storeIndexUrl);
   await page.getByRole('button', { name: 'Add store', exact: true }).click();
@@ -97,6 +99,7 @@ test('installs, updates, filters and uninstalls server extensions from Browse', 
   await page.getByRole('button', { name: /^Sources/ }).click();
   await expect(page.getByRole('button', { name: 'Browse Fixture source EN' })).toBeVisible();
   await page.getByRole('button', { name: 'Extensions', exact: true }).click();
+  await page.getByRole('button', { name: 'Mihon extensions', exact: true }).click();
   await page.getByLabel('Extension status').selectOption('installed');
   await page.screenshot({ path: info.outputPath('mihon-extension-catalog.png'), fullPage: true });
   page.on('dialog', dialog => dialog.accept());

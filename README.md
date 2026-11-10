@@ -1,8 +1,8 @@
 # Mihon PWA for iOS
 
-An installable manga reader inspired by [Mihon Android](https://github.com/mihonapp/mihon). Import your Mihon library, retain its reading state, connect its Android sources through Suwayomi, and download chapters onto your iPhone for offline reading.
+An installable manga reader inspired by [Mihon Android](https://github.com/mihonapp/mihon). Import your Mihon library, retain its reading state, browse built-in sources, and download chapters onto your iPhone for offline reading.
 
-The app stores its library and reading data on the device. MangaDex is built in; [Suwayomi](https://github.com/Suwayomi/Suwayomi-Server) runs other compatible Android extensions on a computer or server. This project is independent of Mihon.
+The app stores its library and reading data on the device. The supplied backup's sources have integrated web adapters: MangaHub, Mangakakalot, Manhwa18.cc (including its legacy ID), MangaDex, Asura Scans, MangaLife, MangaFox, and Kissmanga.in. These adapters use the app's included HTTP functions and require no Suwayomi setup. Website availability varies; see [source status and setup](docs/SOURCES.md). [Suwayomi](https://github.com/Suwayomi/Suwayomi-Server) remains available for compatible Android APK extensions. This project is independent of Mihon.
 
 ## Start locally
 
@@ -20,7 +20,7 @@ npm run build
 npm start
 ```
 
-Open `http://localhost:4173`. `npm start` reads `.env` if present. Copy `.env.example` to `.env` to configure `SUWAYOMI_URL` for the bundled connection. `npm run preview` also includes the proxies.
+Open `http://localhost:4173`. Built-in sources need no `.env` or `SUWAYOMI_URL`. `npm start` reads `.env` if present; use it to configure the optional Suwayomi connection. `npm run preview` also includes the proxies.
 
 For the PWA, Suwayomi, and optional trusted HTTPS setup together, follow [docs/SUWAYOMI.md](docs/SUWAYOMI.md). There is also an offline setup guide at `/help/suwayomi.html`, linked from Connections.
 
@@ -28,8 +28,8 @@ For the PWA, Suwayomi, and optional trusted HTTPS setup together, follow [docs/S
 
 1. Export a `.tachibk` backup from Mihon and move it to your iPhone’s Files app.
 2. Open **More → Backup & restore → Choose backup**. Review the counts and sources, then restore. Restoration merges with your library and preserves newer local reading progress.
-3. For Android sources, start Suwayomi and connect in **Connections**. Open **Browse → Extensions**, add the stores retained from your Mihon backup, and install the matching extensions. You can also use Suwayomi's WebUI.
-4. Use **Copy to server** beside the retained Mihon backup. This gives Suwayomi the original source IDs and manga/chapter URLs. If your hosting platform limits uploads, restore the original file in Suwayomi’s WebUI instead.
+3. Open **Browse → Sources** and choose a built-in source. Imported source IDs and chapter keys match the adapters; no extension installation or **Copy to server** is needed for built-in sources.
+4. For other Android extensions, optionally connect Suwayomi in **Connections**, install their matching extensions under **Browse → Extensions → Mihon extensions**, and use **Copy to server** beside the retained backup.
 5. Open a title and download chapters. Completed chapters can be read with both the network and Suwayomi unavailable.
 
 The repository's `app.mihon_2026-11-07_15-00.tachibk` is an empty placeholder. The separate original backup supplied from Downloads was parsed successfully: 310 manga records, 146 library titles, 60,192 chapters and 19,965 history entries. Personal backup files and generated inspection artifacts are excluded from Git.
@@ -62,7 +62,7 @@ Put each chapter’s numbered image files in its own ZIP/CBZ archive. Under **Ba
 - Library updates that isolate individual source failures, saved update results, searchable reading history, and source migration that carries reading state.
 - Dark/light themes, mobile safe areas, install icons, an offline app shell, and an explicit app-update prompt.
 
-MangaDex entries from compatible Mihon source IDs or names use the built-in adapter. Other imported source IDs remain exact so a matching Suwayomi extension or web adapter can resolve them. A sample source and web-extension demo are included for trying the reader without external services.
+MangaDex entries from compatible Mihon source IDs or names use its built-in adapter. Other backup IDs remain exact. Chapter refreshes retain old keys when URLs or chapter numbers identify one unique release within the same title; ambiguous releases keep separate keys. A demo web extension is available for development but is not installed or listed in Browse by default.
 
 ## Install and read offline on iPhone
 
@@ -84,11 +84,11 @@ JSON v1 backups remain readable. JSON v2 preserves the additional migration meta
 
 ## Hosting and source networking
 
-- **Node/Docker:** the production server serves `dist/`, proxies official MangaDex hosts, and proxies a pinned `SUWAYOMI_URL` under `/api/suwayomi/`.
-- **Vercel:** `vercel.json` routes nested Suwayomi requests to the included function. Set `SUWAYOMI_URL` in the deployment environment. Function upload/response limits may require direct HTTPS Suwayomi or the Node server for large backups and image pages.
-- **Static hosting:** the app shell works, but source networking needs a separately hosted compatible proxy or a direct HTTPS server with CORS support. MangaDex uses `/api/proxy`, so a static-only host must provide that route.
+- **Node/Docker:** the production server serves `dist/`, MangaDex's `/api/proxy`, the built-in `/api/source` route, and the optional Suwayomi proxy.
+- **Vercel:** the repository includes functions for both built-in source routes. No Suwayomi environment variable is needed for those adapters. Set `SUWAYOMI_URL` only for Android APK extension support. Function request/response limits still apply to large images and backups.
+- **Static hosting:** the app shell works, but built-in source networking requires the included `/api/source` and `/api/proxy` routes. Deploy the Node server or the Vercel functions with the PWA.
 
-The bundled proxy is limited to official MangaDex hosts and the configured Suwayomi server. Other web adapters can use a CORS-enabled API or the custom proxy setting, including `https://proxy.example/?url={url}` templates. See [PLUGIN.md](PLUGIN.md) for the web extension contract. Android APKs run in Suwayomi; they cannot execute inside an iOS browser.
+The source proxy permits only each adapter's approved HTTPS website and image hosts, validates every redirect, and accepts small read-only requests on specific source API routes. Source scripts are parsed as data and never executed. Other web adapters can use a CORS-enabled API or a custom proxy setting; see [PLUGIN.md](PLUGIN.md). Android APKs run in Suwayomi; the integrated web adapters run in the PWA.
 
 ## Development checks
 

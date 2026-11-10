@@ -1,5 +1,7 @@
 import { loadSettings } from './settings';
 import { validateImageBlob } from './images';
+import { backupSourceConfigs, allowedSourceUrl } from '../sources/backupSources';
+import { decodeSourceImage } from './sourceImages';
 
 function isBackendUrl(url: string): boolean {
   const base = loadSettings().suwayomiUrl;
@@ -49,11 +51,15 @@ export function cdnUrl(url: string): string {
   const { proxyBase } = loadSettings();
   if (proxyBase && /^https?:\/\//i.test(url) && !isBackendUrl(url)) return customProxy(url, proxyBase);
   let host: string;
+  let parsed: URL;
   try {
-    host = new URL(url).hostname;
+    parsed = new URL(url);
+    host = parsed.hostname;
   } catch {
     return url;
   }
+  const builtin = backupSourceConfigs.find(source => allowedSourceUrl(source, parsed, true));
+  if (builtin) return `/api/source?${new URLSearchParams({ source: builtin.id, url: parsed.href, image: '1' })}`;
   if (
     host !== 'uploads.mangadex.org' &&
     host !== 'mangadex.network' &&
@@ -168,5 +174,5 @@ export async function fetchImage(url: string, signal?: AbortSignal): Promise<Blo
   }
   const response = await fetchWithTimeout(target, { signal, headers, credentials: 'same-origin', referrerPolicy: 'no-referrer' }, 60000);
   if (!response.ok) { void response.body?.cancel(); throw new Error(`Image download failed (HTTP ${response.status})`); }
-  return validateImageBlob(await response.blob());
+  return decodeSourceImage(await validateImageBlob(await response.blob()), url, signal);
 }

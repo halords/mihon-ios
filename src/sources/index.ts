@@ -1,6 +1,9 @@
 import type { Source } from './Source';
-import { sampleSource } from './sampleSource';
 import { mangadexSource } from './mangadexSource';
+import { mangahubSource } from './mangahubSource';
+import { asuraSource } from './asuraSource';
+import { mangakakalotSource, manhwa18Source, manhwa18LegacySource, mangafoxSource, kissmangaSource } from './htmlSources';
+import { mangalifeSource } from './mangalifeSource';
 
 // Runtime source registry. Built-in sources register at module load;
 // extension plugins (src/lib/plugins.ts) register/unregister at runtime.
@@ -65,4 +68,4 @@ export function requireSource(id: string): Source {
 }
 
 registerSource(mangadexSource, 'builtin');
-registerSource(sampleSource, 'builtin');
+for (const source of [mangahubSource, mangakakalotSource, manhwa18Source, manhwa18LegacySource, asuraSource, mangalifeSource, mangafoxSource, kissmangaSource]) registerSource(source, 'builtin');
