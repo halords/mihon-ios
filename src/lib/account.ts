@@ -153,13 +153,16 @@ export async function acknowledgeChanges(sent: SyncRecord[], userId: string): Pr
   if ((await tx.objectStore('syncControl').get('owner'))?.value !== userId) {
     tx.abort(); await tx.done.catch(() => {}); throw new SessionError('The active account changed.');
   }
-  // One bulk read for the whole batch, then queued native puts completed
-  // by tx.done (was: a get+put awaited per record — ~2 round trips per
-  // record on top of the upload itself). The guard is unchanged: a record
-  // is marked synced only if its clock and device still match what was
-  // sent, so a record edited mid-flight stays pending.
-  const current = new Map((await tx.objectStore('syncRecords').getAll()).map(record => [record.id, record]));
+  // Scoped read: queue one native get per record in the batch (the same
+  // pattern applyRemoteChanges uses), then queued native puts completed
+  // by tx.done. Was: a getAll() over the whole store — at 130k+ records
+  // (chapter payloads included) that full scan ran after EVERY batch and
+  // dwarfed the upload itself. The guard is unchanged: a record is marked
+  // synced only if its clock and device still match what was sent, so a
+  // record edited mid-flight stays pending.
   const store = unwrap(tx.objectStore('syncRecords'));
+  const rows = sent.length ? await nativeGetAll(store, sent.map(record => record.id)) : [];
+  const current = new Map(sent.map((record, i) => [record.id, rows[i] as SyncRecord | undefined]));
   for (const record of sent) {
     const existing = current.get(record.id);
     if (existing?.clock === record.clock && existing.deviceId === record.deviceId) store.put({ ...existing, pending: false });
@@ -238,10 +241,24 @@ export async function applyRemoteChanges(changes: RemoteChange[], cursor: number
   if (changes.length) dispatchDataEvent();
 }
 
+// Stream the syncRecords store instead of materializing it with
+// getAll(): on a large library the store holds 100k+ records with full
+// change payloads, and the callers below need only the pending subset
+// (or a count of it). Cursor order is primary-key order — identical to
+// getAll() — so collected records keep their previous sequence.
+async function scanSyncRecords(db: Awaited<ReturnType<typeof getRawDB>>, visit: (record: SyncRecord) => void): Promise<void> {
+  let cursor = await db.transaction('syncRecords').objectStore('syncRecords').openCursor();
+  while (cursor) { visit(cursor.value); cursor = await cursor.continue(); }
+}
+
 async function summary(): Promise<void> {
   const db = await getRawDB();
-  const [records, last, guestCount] = await Promise.all([db.getAll('syncRecords'), db.get('syncControl', 'lastSync'), guestProfileCount(db)]);
-  publish({ pending: records.filter(record => record.pending).length, lastSync: Number(last?.value ?? 0), deviceLibrary: guestCount });
+  let pending = 0;
+  const [, last, guestCount] = await Promise.all([
+    scanSyncRecords(db, record => { if (record.pending) pending++; }),
+    db.get('syncControl', 'lastSync'), guestProfileCount(db),
+  ]);
+  publish({ pending, lastSync: Number(last?.value ?? 0), deviceLibrary: guestCount });
 }
 function schedule(): void {
   if (timer || !state.user) return;
@@ -260,7 +277,8 @@ async function cycle(): Promise<void> {
   try {
     const db = await getRawDB();
     if ((await db.get('syncControl', 'owner'))?.value !== accountId) throw new SessionError('The active account changed.');
-    const pending = (await db.getAll('syncRecords')).filter(record => record.pending);
+    const pending: SyncRecord[] = [];
+    await scanSyncRecords(db, record => { if (record.pending) pending.push(record); });
     // Batches are sized by exact serialized bytes (SYNC-REVISION-SPEC.md):
     // up to 4,000 records or 3.5 MB per request, whichever comes first —
     // under the server's 4 MB cap, which is under Vercel's 4.5 MB limit.

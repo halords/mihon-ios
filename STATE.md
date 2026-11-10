@@ -170,3 +170,10 @@ The build's ineffective dynamic-import warning is informational: `db.ts` dynamic
 - Full Android feature parity is not claimed. Android APKs need a compatible Suwayomi server, and `.tachibk` images must be downloaded/imported separately.
 
 Temporary test servers and browser sessions were stopped. The production build was generated locally. In a fresh checkout, run `npm ci` and `npm run build` before `npm start`; follow `docs/SUWAYOMI.md` for an installed iPhone and compatible Android sources.
+
+## Sync ack fix (2026-11-10, post-acceptance)
+Acceptance timing on the revised pipeline: 131,039 changes uploaded in ~14–15 min (~150/s) — 3–5× the old build, short of the <3 min target. Root cause: `acknowledgeChanges` ran `syncRecords.getAll()` after EVERY batch (full 130k+ record deserialization, chapter payloads included, × ~33 batches). Fix (account.ts only):
+- Ack reads are scoped to the batch: queued native gets for exactly the sent ids (same pattern as applyRemoteChanges). Owner check + clock/deviceId mid-flight guard unchanged.
+- `summary()` and `cycle()` no longer materialize the whole store via getAll(); a cursor stream (`scanSyncRecords`) counts/collects pending in primary-key order (sequence unchanged). Caveat: still O(n) streaming — a by-pending index would need a db.ts schema bump.
+- New tests: ack against a 5,000-record unrelated backlog with getAll rigged to throw (syncRevision), migration replace-vs-keep pair (tests/migration.test.ts — replace journals a library tombstone; keepOriginal=true keeps both).
+Suite: 111/112 (only pre-existing browserBackend VPS failure). Build clean.

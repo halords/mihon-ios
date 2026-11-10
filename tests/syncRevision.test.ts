@@ -1,7 +1,7 @@
 // SYNC-REVISION-SPEC.md acceptance tests: bulk push/pull over HTTP, the
 // 4 MB server body cap, bulk acknowledge with the mid-flight guard, and
 // a large pull page applied in one pass.
-import { afterEach, beforeEach, expect, it } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { createServer, type Server } from 'node:http';
 import { createClient, type Client } from '@libsql/client';
 import { createAccountHandler } from '../server/account';
@@ -82,6 +82,32 @@ it('acknowledges a large batch in one call and keeps mid-flight edits pending', 
   await acknowledgeChanges(sent, 'user-a');
   const all = await db.getAll('syncRecords');
   expect(all.filter(record => record.pending)).toEqual([expect.objectContaining({ id: edited.id, clock: edited.clock + 1 })]);
+}, 60000);
+
+it('acknowledges a small batch against a large unrelated backlog without reading or touching it', async () => {
+  await activateAccountProfile('user-a');
+  const db = await getRawDB();
+  const unrelated: SyncRecord[] = Array.from({ length: 5000 }, (_, i) => {
+    const key = 'mangadex::other::ch-' + i;
+    return { id: syncId('chapterMeta', key), store: 'chapterMeta', key, clock: 700, deviceId: 'device-a', deleted: false,
+      data: { key, mangaKey: 'mangadex::other', chapter: { id: 'ch-' + i, name: 'Chapter ' + i, number: i } }, pending: true };
+  });
+  const batch: SyncRecord[] = [0, 1, 2].map(i => ({ ...chapterState(20000 + i, 800), pending: true }));
+  const tx = db.transaction('syncRecords', 'readwrite'); const store = tx.objectStore('syncRecords');
+  for (const record of [...unrelated, ...batch]) void store.put(record);
+  await tx.done;
+  // One batch record is edited while the batch is "in flight": its clock moves.
+  const edited = batch[1]!;
+  await db.put('syncRecords', { ...edited, clock: edited.clock + 1 });
+  // The acknowledgement must be scoped to the batch: rig the store's
+  // getAll to throw and require the ack to succeed anyway.
+  const getAll = vi.spyOn(IDBObjectStore.prototype, 'getAll').mockImplementation(() => { throw new Error('acknowledgeChanges must not read the whole store'); });
+  try { await acknowledgeChanges(batch, 'user-a'); } finally { getAll.mockRestore(); }
+  const all = await db.getAll('syncRecords');
+  expect(all).toHaveLength(5003);
+  expect(all.filter(record => !record.pending).map(record => record.id).sort()).toEqual([batch[0]!.id, batch[2]!.id].sort());
+  expect(all.filter(record => record.pending)).toHaveLength(5001);
+  expect(all.find(record => record.id === edited.id)).toMatchObject({ pending: true, clock: edited.clock + 1 });
 }, 60000);
 
 it('applies a 2,000-change pull page with downloads preserved and removals marked', async () => {
