@@ -6,6 +6,7 @@ import { initPlugins } from './lib/plugins'
 import { initSuwayomi } from './lib/suwayomi'
 import { initDownloadQueue } from './lib/downloadQueue'
 import { reconcileDownloads } from './lib/downloads'
+import { initAccount } from './lib/account'
 
 // Local-first app: ask the browser to keep our on-device data (library,
 // progress, downloads) safe from automatic storage eviction. Best effort —
@@ -28,6 +29,7 @@ async function boot(): Promise<void> {
       <App />
     </StrictMode>,
   )
+  void initAccount().catch(() => undefined)
   void (async () => {
     try { await initSuwayomi(); await reconcileDownloads(); await initDownloadQueue(); }
     catch { /* An unavailable storage API or connection must not block the shell. */ }

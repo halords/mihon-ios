@@ -8,7 +8,7 @@ import { blobPart } from '../lib/bytes';
 import { parseTachibk } from './parser';
 import { gunzipIfNeeded } from './compression';
 import { jsonSafe, type ParsedBackup, type ParsedManga } from './models';
-import { unwrap } from 'idb';
+import { syncNativeStore } from '../lib/syncStorage';
 
 export { parseTachibk } from './parser';
 export { gunzipIfNeeded } from './compression';
@@ -126,9 +126,9 @@ export async function restoreTachibk(preview: TachibkPreview, options: RestoreOp
     const histories = new Map(oldHistory.map(history => [history.key, history]));
     // Native requests bubble failures to tx.done. They avoid creating a
     // promise/success callback for every one of thousands of chapter writes.
-    const chapterStore = unwrap(tx.objectStore('chapterMeta'));
-    const stateStore = unwrap(tx.objectStore('chapterState'));
-    const historyStore = unwrap(tx.objectStore('history'));
+    const chapterStore = syncNativeStore(tx.objectStore('chapterMeta'));
+    const stateStore = syncNativeStore(tx.objectStore('chapterState'));
+    const historyStore = syncNativeStore(tx.objectStore('history'));
     for (const category of categories) await tx.objectStore('categories').put(category);
     for (const [index, pm] of backup.manga.entries()) {
       const sourceName = names.get(pm.source.toString()) ?? (pm.source === 0n ? 'Local files' : `Source ${pm.source}`);

@@ -5,6 +5,8 @@ import type { SChapter, SManga } from '../sources/Source';
 import type { ReaderMode, Settings } from './settings';
 import { loadSettings, saveSettings } from './settings';
 import { fromBase64, toBase64, blobPart } from './bytes';
+import { trackSyncWrites } from './syncStorage';
+import type { DeviceProfile, SyncRecord } from './syncTypes';
 
 export interface StoredManga {
   key: string;
@@ -135,6 +137,9 @@ export interface InstalledPluginRecord {
 }
 
 export interface MihonDB extends DBSchema {
+  syncRecords: { key: string; value: SyncRecord };
+  syncControl: { key: string; value: MetadataRecord };
+  syncProfiles: { key: string; value: DeviceProfile };
   categories: { key: string; value: CategoryRecord };
   archives: { key: string; value: StoredArchiveRecord };
   metadata: { key: string; value: MetadataRecord };
@@ -176,9 +181,9 @@ export interface MihonDB extends DBSchema {
 
 let databasePromise: Promise<IDBPDatabase<MihonDB>> | undefined;
 
-export async function getDB(): Promise<IDBPDatabase<MihonDB>> {
+export async function getRawDB(): Promise<IDBPDatabase<MihonDB>> {
   if (!databasePromise) {
-    databasePromise = openDB<MihonDB>('mihon-pwa', 4, {
+    databasePromise = openDB<MihonDB>('mihon-pwa', 5, {
       upgrade(db, oldVersion, _nextVersion, tx) {
         if (oldVersion < 1) {
           db.createObjectStore('manga', { keyPath: 'key' });
@@ -214,6 +219,11 @@ export async function getDB(): Promise<IDBPDatabase<MihonDB>> {
           db.createObjectStore('backendBindings', { keyPath: 'key' });
         }
         if (oldVersion < 4) tx.objectStore('history').createIndex('by-manga', 'mangaKey');
+        if (oldVersion < 5) {
+          db.createObjectStore('syncRecords', { keyPath: 'id' });
+          db.createObjectStore('syncControl', { keyPath: 'key' });
+          db.createObjectStore('syncProfiles', { keyPath: 'key' });
+        }
       },
       blocked() { dispatchDataEvent('mihon:database-blocked'); },
       blocking(_current, _next, event) {
@@ -228,6 +238,8 @@ export async function getDB(): Promise<IDBPDatabase<MihonDB>> {
 
   return databasePromise;
 }
+
+export async function getDB(): Promise<IDBPDatabase<MihonDB>> { return trackSyncWrites(await getRawDB()); }
 
 export async function putManga(
   manga: SManga,

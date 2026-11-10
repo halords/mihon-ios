@@ -10,3 +10,4 @@ playwright-report/
 *.tachibk
 *.cbz
 *.mihon.zip
+.vercel

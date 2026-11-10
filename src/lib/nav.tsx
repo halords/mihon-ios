@@ -2,13 +2,14 @@ import { createContext, useContext, useEffect, useState, type ReactNode } from '
 
 export type TabId = 'library' | 'updates' | 'history' | 'browse' | 'more';
 export type Route = { name: 'tabs' } | { name: 'details'; mangaKey: string } |
-  { name: 'reader'; mangaKey: string; chapterId: string } | { name: 'settings' | 'extensions' | 'downloads' | 'backup' | 'categories' | 'connections' } |
+  { name: 'reader'; mangaKey: string; chapterId: string } | { name: 'settings' | 'extensions' | 'downloads' | 'backup' | 'categories' | 'connections' | 'account' } |
   { name: 'migrate'; mangaKey: string };
 export interface Nav {
   tab: TabId; route: Route;
   setTab(tab: TabId): void; openManga(key: string): void; openReader(key: string, chapterId: string): void;
   openSettings(): void; openExtensions(): void; openDownloads(): void; openBackup(): void;
   openCategories(): void; openConnections(): void; openMigration(key: string): void; back(): void;
+  openAccount(): void;
 }
 type NavigationState = { tab: TabId; route: Route };
 const TABS: TabId[] = ['library', 'updates', 'history', 'browse', 'more'];
@@ -24,7 +25,7 @@ function readLocation(): NavigationState {
   if (path === '/details' && key?.includes('::')) return { tab, route: { name: 'details', mangaKey: key } };
   if (path === '/migrate' && key?.includes('::')) return { tab, route: { name: 'migrate', mangaKey: key } };
   const name = path?.slice(1);
-  if (['settings', 'extensions', 'downloads', 'backup', 'categories', 'connections'].includes(name ?? '')) {
+  if (['settings', 'extensions', 'downloads', 'backup', 'categories', 'connections', 'account'].includes(name ?? '')) {
     return { tab, route: { name: name as 'settings' } };
   }
   return { tab: TABS.includes(name as TabId) ? name as TabId : tab, route: { name: 'tabs' } };
@@ -69,6 +70,7 @@ export function NavProvider({ children }: { children: ReactNode }) {
     openSettings: () => go({ name: 'settings' }), openExtensions: () => go({ name: 'extensions' }),
     openDownloads: () => go({ name: 'downloads' }), openBackup: () => go({ name: 'backup' }),
     openCategories: () => go({ name: 'categories' }), openConnections: () => go({ name: 'connections' }),
+    openAccount: () => go({ name: 'account' }),
     openMigration: mangaKey => go({ name: 'migrate', mangaKey }),
     back() {
       if (state.route.name === 'reader' && history.state?.from !== 'details') go({ name: 'details', mangaKey: state.route.mangaKey }, state.tab, true);

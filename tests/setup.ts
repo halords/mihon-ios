@@ -45,7 +45,7 @@ beforeEach(async () => {
   vi.stubGlobal('navigator', { onLine: true, storage: { persist: async () => true } });
   vi.stubGlobal('caches', new MemoryCaches());
   vi.stubGlobal('Worker', undefined);
-  const { getDB } = await import('../src/lib/db');
-  const db = await getDB();
+  const { getRawDB } = await import('../src/lib/db');
+  const db = await getRawDB();
   for (const name of db.objectStoreNames) await db.clear(name);
 });

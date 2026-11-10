@@ -107,7 +107,7 @@ test('downloads chapters from a source, persists its queue, and reads them offli
   await page.getByLabel('Browse source').selectOption('demo-extension');
   await page.getByRole('button', { name: 'Open Ember Sea' }).click();
   await page.getByRole('button', { name: 'Add to library', exact: true }).click();
-  await expect(page.getByRole('button', { name: 'In library', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'In library', exact: true })).toBeEnabled();
   await page.getByRole('button', { name: 'Download', exact: true }).click();
   await page.getByRole('button', { name: /Next 5 unread chapters/ }).click();
   await expect(page.getByText('5 chapters available offline')).toBeVisible({ timeout: 30000 });
@@ -121,10 +121,16 @@ test('downloads chapters from a source, persists its queue, and reads them offli
   await assertImage(page);
   expect(await page.locator('.reader-screen').evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
 });
-test('keeps working browse results when another source fails', async ({ page, context }) => {
+test('keeps working browse results when another source fails', async ({ page }) => {
+  await page.addInitScript(() => {
+    const original = window.fetch.bind(window);
+    window.fetch = async (input, init) => {
+      const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url, location.origin);
+      if (url.pathname === '/api/proxy' || url.pathname === '/api/source') return new Response('{"error":"Unavailable test source"}', { status: 502, headers: { 'Content-Type': 'application/json' } });
+      return original(input, init);
+    };
+  });
   await installDemo(page);
-  await context.route('**/api/proxy?*', route => route.fulfill({ status: 502, contentType: 'application/json', body: '{"error":"Unavailable test source"}' }));
-  await context.route('**/api/source?*', route => route.fulfill({ status: 502, contentType: 'application/json', body: '{"error":"Unavailable test source"}' }));
   await page.goto('/#/browse');
   await page.getByRole('button', { name: 'Titles', exact: true }).click();
   await page.getByLabel('Browse source').selectOption('all');
@@ -152,7 +158,8 @@ test('installs relative extension indexes and retains class methods and private 
   // Service-worker requests can bypass WebKit's route mocks. Serve this
   // fixture from the actual HTTP server, with a separate path per project.
   const root = resolve('dist');
-  const folder = resolve(root, '__test', info.project.name, 'class-extension');
+  const fixtureName = info.project.name + '-' + info.repeatEachIndex;
+  const folder = resolve(root, '__test', fixtureName, 'class-extension');
   if (!folder.startsWith(root + sep)) throw new Error('Invalid fixture directory');
   await mkdir(folder, { recursive: true });
   await writeFile(resolve(folder, 'index.json'), JSON.stringify({ name: 'Class fixture index', sources: [{ id: 'prototype-source', name: 'Prototype source', version: '1', moduleUrl: 'source.mjs' }] }));
@@ -160,7 +167,7 @@ test('installs relative extension indexes and retains class methods and private 
   try {
   await page.goto('/#/extensions');
   await page.getByRole('button', { name: 'Web extensions', exact: true }).click();
-  await page.locator('input[type="url"]').fill(`/__test/${info.project.name}/class-extension/index.json`);
+  await page.locator('input[type="url"]').fill(`/__test/${fixtureName}/class-extension/index.json`);
   await page.getByRole('button', { name: 'Add', exact: true }).click();
   const index = page.locator('section').filter({ has: page.getByRole('heading', { name: 'Class fixture index' }) });
   await index.getByRole('button', { name: 'Install', exact: true }).click();
@@ -170,6 +177,7 @@ test('installs relative extension indexes and retains class methods and private 
   await page.getByLabel('Browse source').selectOption('prototype-source');
   await page.getByRole('button', { name: 'Open Prototype Hero' }).click();
   await page.getByRole('button', { name: 'Add to library', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'In library', exact: true })).toBeEnabled();
   await page.getByRole('button', { name: 'Download', exact: true }).click();
   await page.getByRole('button', { name: /Next 5 unread chapters/ }).click();
   await expect(page.getByText('1 chapters available offline')).toBeVisible();

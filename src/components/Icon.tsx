@@ -19,6 +19,7 @@ const paths = {
   heart: 'M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.7l-1.1-1.1a5.5 5.5 0 0 0-7.8 7.8L12 21l8.8-8.6a5.5 5.5 0 0 0 0-7.8',
   trash: 'M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7M14 10v7',
   plus: 'M12 4v16M4 12h16', chevron: 'm9 5 7 7-7 7',
+  account: 'M16 7a4 4 0 1 1-8 0 4 4 0 0 1 8 0M4 21v-2a8 8 0 0 1 16 0v2',
 } as const;
 export type IconName = keyof typeof paths;
 export default function Icon({ name, size = 22, filled = false }: { name: IconName; size?: number; filled?: boolean }) {

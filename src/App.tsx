@@ -20,6 +20,7 @@ import DownloadsPage from './pages/DownloadsPage';
 import CategoriesPage from './pages/CategoriesPage';
 import ConnectionsPage from './pages/ConnectionsPage';
 import MigrationPage from './pages/MigrationPage';
+import AccountPage from './pages/AccountPage';
 import { PwaStatus, QueueBar } from './components/PwaStatus';
 import { Toast } from './components/Feedback';
 import './index.css';
@@ -57,6 +58,7 @@ function Shell() {
   if (route.name === 'categories') return <CategoriesPage />;
   if (route.name === 'connections') return <ConnectionsPage />;
   if (route.name === 'migrate') return <MigrationPage mangaKey={route.mangaKey} />;
+  if (route.name === 'account') return <AccountPage />;
 
   const ActiveTabPage = tabPages[tab];
 

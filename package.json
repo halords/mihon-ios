@@ -12,9 +12,12 @@
     "start:browser": "node --env-file-if-exists=.env browser-server/index.mjs",
     "test": "vitest run",
     "test:e2e": "playwright test",
+    "test:sync": "playwright test --config playwright.sync.config.ts",
+    "account:setup": "node --env-file-if-exists=.env scripts/setup-account-db.mjs",
     "test:server": "vitest run --config vitest.server.config.ts"
   },
   "dependencies": {
+    "@libsql/client": "^0.18.0",
     "fflate": "^0.8.3",
     "idb": "^8.0.4",
     "playwright": "^1.65.0",

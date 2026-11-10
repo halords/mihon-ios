@@ -1,0 +1,16 @@
+.git/
+.vercel/
+node_modules/
+dist/
+.prompts/
+.lane-out/
+test-results/
+playwright-report/
+.browser-state/
+.env*
+**/*.sqlite*
+**/*.apk
+**/*.jar
+**/*.tachibk
+**/*.cbz
+**/*.mihon.zip

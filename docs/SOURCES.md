@@ -38,7 +38,7 @@ Mangakakalot's current Android extension derives old opaque Manganato IDs from t
 
 Migration defaults to Asura Scans (Mangakakalot when the original is already Asura), and searches the selected replacement source automatically. Changing sources clears the old results/review, and late responses from previous searches cannot replace the current selection. MangaBox search follows the website's lowercase, accent and punctuation alias rules and reads titles from their title links. Asura's subscription chapters open their actual source page.
 
-Chapter rows show explicit Read/Unread labels. Unread rows have brighter text and a purple edge/background; read rows have a checkmark and muted text. Fully read library entries show a Read badge and less saturated cover artwork.
+Chapter rows pair a purple unread dot or a read checkmark with the upload date on one line. Read chapters have muted titles; status labels remain available to screen readers. Long-press a chapter, then another, to select the inclusive range in the displayed order. Tap individual chapters to adjust the selection, then use the floating Read/Unread controls. Fully read library entries show a Read badge and less saturated cover artwork. Migration uses a small source logo beside each title.
 
 Downloaded chapters remain readable without the website or a server connection. Export their images separately as CBZ when returning to Android. The current-state `.tachibk` export continues to use the original numeric source IDs.
 

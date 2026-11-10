@@ -6,6 +6,9 @@ services:
     environment:
       PORT: "4173"
       SUWAYOMI_URL: http://suwayomi:4567
+      TURSO_DATABASE_URL: "${TURSO_DATABASE_URL:-}"
+      TURSO_AUTH_TOKEN: "${TURSO_AUTH_TOKEN:-}"
+      ACCOUNT_PUBLIC_ORIGIN: "${ACCOUNT_PUBLIC_ORIGIN:-}"
     ports:
       - "127.0.0.1:4173:4173"
     depends_on:

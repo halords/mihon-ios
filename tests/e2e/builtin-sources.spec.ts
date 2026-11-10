@@ -13,18 +13,24 @@ const sources = [
   ['6484561431658238800', 'MangaFox'],
   ['3112384885023225761', 'Kissmanga.in'],
 ];
-async function fixtureRequests(page: Page, blockKiss = false) {
+async function fixtureRequests(page: Page, blockKiss = false, holdMangaDex = false) {
   // <img> requests do not call window.fetch. Serve their synthetic bytes
   // separately from the API fixtures used by the adapter methods.
   await page.context().route('**/api/source?*', async route => {
     if (new URL(route.request().url()).searchParams.has('image')) await route.fulfill({ contentType: 'image/svg+xml', body: '<svg xmlns="http://www.w3.org/2000/svg" width="800" height="1200"><rect width="800" height="1200" fill="red"/></svg>' });
     else await route.continue();
   });
-  await page.addInitScript(blockKiss => {
+  await page.addInitScript(({ blockKiss, holdMangaDex }) => {
     const original = window.fetch.bind(window);
+    const held = holdMangaDex ? new Promise<void>(resolve => { Object.assign(window, { mihonFixtureRelease: resolve }); }) : undefined;
     const image = '<svg xmlns="http://www.w3.org/2000/svg" width="800" height="1200"><rect width="800" height="600" fill="blue"/><rect y="600" width="800" height="600" fill="red"/></svg>';
     window.fetch = async (input, init) => {
       const request = new URL(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url, location.origin);
+      if (held && request.pathname === '/api/proxy') {
+        Object.assign(window, { mihonFixtureRequested: true });
+        await held;
+        return new Response('{"error":"Delayed old source error"}', { status: 502, headers: { 'Content-Type': 'application/json' } });
+      }
       if (request.pathname !== '/api/source') return original(input, init);
       if (navigator.onLine === false) throw new TypeError('Offline fixture');
       if (request.searchParams.has('image')) return new Response(image, { headers: { 'Content-Type': 'image/svg+xml' } });
@@ -69,7 +75,7 @@ async function fixtureRequests(page: Page, blockKiss = false) {
       if (url.pathname === '/webtoon/fixture') return html('<div class="post-title"><h1>Fixture Hero</h1></div><div class="summary_image"><img src="https://manhwa18.cc/cover.jpg"></div><ul class="row-content-chapter"><li><a href="/webtoon/fixture/chapter-1">Chapter 1</a><span class="chapter-time">01 Jan 2026</span></li></ul>');
       return html('<div class="page-item-detail"><h3><a href="/webtoon/fixture">Fixture Hero</a></h3><img src="https://manhwa18.cc/cover.jpg"></div>');
     };
-  }, blockKiss);
+  }, { blockKiss, holdMangaDex });
 }
 for (const [id, name] of sources) {
   test(`browses ${name}, loads chapters and reads its built-in pages without Suwayomi`, async ({ page }) => {
@@ -158,19 +164,16 @@ test('migrates a MangaHub title to the default Asura source after chapter review
   await expect(page.locator('.chapter-row.is-read .chapter-reading-state')).toHaveText('Read');
 });
 test('discards an old replacement search when the user changes sources', async ({ page }) => {
-  await fixtureRequests(page);
-  let release!: () => void;
-  let started!: () => void;
-  const requested = new Promise<void>(resolve => { started = resolve; });
-  const held = new Promise<void>(resolve => { release = resolve; });
-  await page.context().route('**/api/proxy?*', async route => { started(); await held; await route.fulfill({ status: 502, contentType: 'application/json', body: '{"error":"Delayed old source error"}' }); });
+  await fixtureRequests(page, false, true);
   const original = await seedMigration(page);
   await page.goto('/#/migrate?' + new URLSearchParams({ manga: original }));
+  await expect(page.getByLabel('Search replacement title')).toHaveValue('Fixture Hero');
+  await expect(page.getByRole('button', { name: 'Open Fixture Hero', exact: true })).toBeVisible();
   await page.getByLabel('Replacement source').selectOption('mangadex');
-  await requested;
+  await page.waitForFunction(() => Reflect.get(window, 'mihonFixtureRequested'));
   await page.getByLabel('Replacement source').selectOption('2528986671771677900');
   await expect(page.getByRole('button', { name: 'Open Fixture Hero', exact: true })).toBeVisible();
-  release();
+  await page.evaluate(() => Reflect.get(window, 'mihonFixtureRelease')());
   await expect(page.getByRole('alert')).toHaveCount(0);
   await page.getByRole('button', { name: 'Open Fixture Hero', exact: true }).click();
   await expect(page.locator('.migration-review')).toContainText('Mangakakalot');

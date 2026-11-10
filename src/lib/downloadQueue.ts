@@ -127,6 +127,14 @@ export async function setDownloadsPaused(paused: boolean): Promise<void> {
   if (!paused) void pump();
 }
 
+export async function waitForDownloadsIdle(): Promise<void> {
+  const started = Date.now();
+  while (current) {
+    if (Date.now() - started > 30000) throw new Error('The current download is still stopping. Try signing in again shortly.');
+    await new Promise(resolve => setTimeout(resolve, 20));
+  }
+}
+
 export async function retryDownload(key: string): Promise<void> {
   await initDownloadQueue();
   const db = await getDB();

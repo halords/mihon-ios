@@ -4,6 +4,7 @@ import { resolve, extname, sep } from 'node:path';
 import { handleMangaDexProxy, handleSuwayomiProxy, proxyError } from './proxy.ts';
 import { handleSourceProxy } from './sourceProxy.ts';
 import { handleBrowserSessionProxy } from './browserBridge.ts';
+import { handleAccount } from './account.ts';
 
 const root = resolve('dist');
 const port = Number(process.env.PORT || 4173);
@@ -11,6 +12,7 @@ const host = process.env.HOST || '0.0.0.0';
 const types = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.png': 'image/png', '.json': 'application/json', '.webmanifest': 'application/manifest+json' };
 const server = createServer(async (req, res) => {
   try {
+    if (req.url?.split('?')[0] === '/api/account') return await handleAccount(req, res);
     if (req.url?.startsWith('/api/proxy?')) return await handleMangaDexProxy(req, res);
     if (req.url?.startsWith('/api/source?')) return await handleSourceProxy(req, res);
     if (req.url?.startsWith('/api/source-browser?')) return await handleBrowserSessionProxy(req, res);

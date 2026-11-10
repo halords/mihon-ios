@@ -3,6 +3,7 @@
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
   "functions": {
+    "api/account.ts": { "maxDuration": 60 },
     "api/source.ts": { "maxDuration": 60 },
     "api/source-browser.ts": { "maxDuration": 60 }
   },

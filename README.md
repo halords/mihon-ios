@@ -2,7 +2,7 @@
 
 An installable manga reader inspired by [Mihon Android](https://github.com/mihonapp/mihon). Import your Mihon library, retain its reading state, browse built-in sources, and download chapters onto your iPhone for offline reading.
 
-The app stores its library and reading data on the device. The supplied backup's sources have integrated web adapters: MangaHub, Mangakakalot, Manhwa18.cc (including its legacy ID), MangaDex, Asura Scans, MangaLife, MangaFox, and Kissmanga.in. These adapters use the app's included HTTP functions and require no Suwayomi setup. Website availability varies; see [source status and setup](docs/SOURCES.md). [Suwayomi](https://github.com/Suwayomi/Suwayomi-Server) remains available for compatible Android APK extensions. This project is independent of Mihon.
+The app stores its library and reading data on the device, with optional [Turso accounts and automatic sync](docs/ACCOUNTS.md) across your devices. The supplied backup's sources have integrated web adapters: MangaHub, Mangakakalot, Manhwa18.cc (including its legacy ID), MangaDex, Asura Scans, MangaLife, MangaFox, and Kissmanga.in. These adapters use the app's included HTTP functions and require no Suwayomi setup. Website availability varies; see [source status and setup](docs/SOURCES.md). [Suwayomi](https://github.com/Suwayomi/Suwayomi-Server) remains available for compatible Android APK extensions. This project is independent of Mihon.
 
 ## Start locally
 
@@ -82,7 +82,7 @@ Use **Export PWA library (.json)** for metadata, reading state, settings, catego
 
 Use **Export for Mihon Android (.tachibk)** to create a new compressed Mihon backup containing current library membership, progress, bookmarks, history, categories, notes, tracking records, compatible source IDs and retained Android preferences/stores. Install matching extensions on Android, then restore the file in Mihon. Chapters downloaded on iOS must be exported separately as CBZ. Browser-only source IDs cannot be represented in Mihon; the export explains which titles need source migration instead of silently omitting them.
 
-JSON v1 backups remain readable. JSON v2 preserves the additional migration metadata. Included web extension code is only activated when you select that restore option. There is no account synchronization. The original `.tachibk` can also be exported unchanged; generated Android backups contain current supported data rather than an unchanged copy of the old file.
+JSON v1 backups remain readable. JSON v2 preserves the additional migration metadata. Included web extension code is only activated when you select that restore option. Account sync keeps your library and reading history across devices while imports/exports remain available. The original `.tachibk` can also be exported unchanged; generated Android backups contain current supported data rather than an unchanged copy of the old file.
 
 ## Hosting and source networking
 
