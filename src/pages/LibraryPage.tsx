@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { MangaGrid, MangaList, type MangaListItem } from '../components/MangaViews';
 import Icon from '../components/Icon';
 import Sheet from '../components/Sheet';
@@ -7,8 +7,7 @@ import { EmptyState, toast } from '../components/Feedback';
 import { getCategories, getDB, libraryCategories, patchChapterState, removeFromLibrary, setLibraryCategory } from '../lib/db';
 import { useNav } from '../lib/nav';
 import { saveSettings } from '../lib/settings';
-import { useDataEvents, useSettings } from '../lib/hooks';
-import { useLoad } from '../lib/useLoad';
+import { useSettings } from '../lib/hooks';
 import { getSource } from '../sources';
 import { enqueueChapters } from '../lib/downloadQueue';
 import { compareLibraryItems, LIBRARY_SORT_OPTIONS } from '../lib/librarySort';
@@ -50,13 +49,47 @@ async function loadLibrary() {
   });
   return { items, state, downloaded, resume, categories: await getCategories() };
 }
+type LibraryData = Awaited<ReturnType<typeof loadLibrary>>;
+
+// Session snapshot: the library view is assembled once per app load and
+// kept in memory. Tab switches render it instantly — no re-read of the
+// ~140k chapter/history records behind it. It is NOT event-driven: data
+// changes elsewhere (reading, sync pulls, other tabs) do not reload this
+// page. The view updates only when needed — after an action taken on this
+// page, or when the reader taps the refresh button. A full app reload
+// assembles it fresh.
+let librarySnapshot: LibraryData | null = null;
+
+function useLibraryData() {
+  const [data, setData] = useState<LibraryData | null>(() => librarySnapshot);
+  const [loading, setLoading] = useState(() => librarySnapshot === null);
+  const [error, setError] = useState<string | null>(null);
+  const run = useRef(0);
+  const reload = useCallback(() => {
+    const current = ++run.current;
+    setLoading(true);
+    setError(null);
+    loadLibrary().then(result => {
+      if (run.current !== current) return;
+      librarySnapshot = result;
+      setData(result);
+      setLoading(false);
+    }).catch(cause => {
+      if (run.current !== current) return;
+      setError(cause instanceof Error ? cause.message : String(cause));
+      setLoading(false);
+    });
+  }, []);
+  useEffect(() => { if (librarySnapshot === null) reload(); }, [reload]);
+  return { data, loading, error, reload };
+}
+
 type Filter = 'all' | 'unread' | 'started' | 'completed' | 'bookmarked' | 'missing';
 
 export default function LibraryPage() {
   const nav = useNav();
   const settings = useSettings();
-  const { data, loading, error, reload } = useLoad(loadLibrary, []);
-  useDataEvents(reload);
+  const { data, loading, error, reload } = useLibraryData();
   const [category, setCategory] = useState('All');
   const [query, setQuery] = useState('');
   const [showSearch, setShowSearch] = useState(false);
@@ -94,7 +127,7 @@ export default function LibraryPage() {
   return <main className="screen library-screen">
     <header className={`topbar ${selecting ? 'selection-topbar' : ''}`}>
       {selecting ? <><button className="icon-btn" aria-label="Cancel selection" onClick={clearSelection}><Icon name="close" /></button><h1>{selected.size} selected</h1><button className="icon-btn" aria-label="Select all visible titles" onClick={() => setSelected(new Set(visible.map(i => i.entry.key)))}><Icon name="check" /></button></> :
-        <><h1>Library <span className="title-count">{all.length}</span></h1><button className="icon-btn" aria-label="Search library" aria-pressed={showSearch} onClick={() => setShowSearch(!showSearch)}><Icon name="search" /></button><button className={`icon-btn ${filter !== 'all' || settings.downloadedOnly ? 'accent' : ''}`} aria-label="Filter and sort library" onClick={() => setSheet('filters')}><Icon name="filter" /></button><button className="icon-btn" aria-label="Library options" onClick={() => setSheet('more')}><Icon name="more" /></button></>}
+        <><h1>Library <span className="title-count">{all.length}</span></h1><button className="icon-btn" aria-label="Refresh library" onClick={reload}><Icon name="refresh" /></button><button className="icon-btn" aria-label="Search library" aria-pressed={showSearch} onClick={() => setShowSearch(!showSearch)}><Icon name="search" /></button><button className={`icon-btn ${filter !== 'all' || settings.downloadedOnly ? 'accent' : ''}`} aria-label="Filter and sort library" onClick={() => setSheet('filters')}><Icon name="filter" /></button><button className="icon-btn" aria-label="Library options" onClick={() => setSheet('more')}><Icon name="more" /></button></>}
     </header>
     {showSearch && <div className="searchbar"><Icon name="search" /><input type="search" autoFocus aria-label="Search your library" placeholder="Title, author, or source" value={query} onChange={e => setQuery(e.target.value)} /></div>}
     <div className="category-tabs" aria-label="Library categories">{['All', ...new Set((data?.categories ?? []).map(c => c.name))].map(name =>

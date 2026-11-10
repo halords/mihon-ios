@@ -19,27 +19,43 @@ export function accountClient(): Client | null {
 }
 export async function initializeAccounts(client: Client): Promise<void> { await client.batch(ACCOUNT_SCHEMA, 'write'); }
 
+// One client request may carry thousands of changes (see
+// SYNC-REVISION-SPEC.md). The statements still land through libSQL batch
+// calls, chunked so a single batch never carries an unbounded statement
+// list; each chunk is one transaction and the upserts are idempotent, so
+// a client retry after a partial failure re-applies safely.
+const PUSH_CHUNK_CHANGES = 1000;
+
 export async function pushChanges(client: Client, userId: string, changes: SyncChange[]): Promise<void> {
-  const statements: InStatement[] = [{ sql: 'INSERT OR IGNORE INTO mihon_sync_clock(user_id,revision) VALUES (?,0)', args: [userId] }];
-  for (const change of changes) {
-    statements.push({ sql: 'UPDATE mihon_sync_clock SET revision=revision+1 WHERE user_id=?', args: [userId] });
-    statements.push({ sql: `INSERT INTO mihon_sync_records(user_id,store,record_key,data,deleted,client_clock,device_id,revision)
-      VALUES (?,?,?,?,?,?,?,(SELECT revision FROM mihon_sync_clock WHERE user_id=?))
-      ON CONFLICT(user_id,store,record_key) DO UPDATE SET data=excluded.data,deleted=excluded.deleted,client_clock=excluded.client_clock,device_id=excluded.device_id,revision=excluded.revision
-      WHERE excluded.client_clock>mihon_sync_records.client_clock OR (excluded.client_clock=mihon_sync_records.client_clock AND excluded.device_id>mihon_sync_records.device_id)`,
-      args: [userId, change.store, change.key, change.data === null ? null : JSON.stringify(change.data), Number(change.deleted), change.clock, change.deviceId, userId] });
+  if (changes.length === 0) {
+    await client.batch([{ sql: 'INSERT OR IGNORE INTO mihon_sync_clock(user_id,revision) VALUES (?,0)', args: [userId] }], 'write');
+    return;
   }
-  await client.batch(statements, 'write');
+  for (let start = 0; start < changes.length; start += PUSH_CHUNK_CHANGES) {
+    const chunk = changes.slice(start, start + PUSH_CHUNK_CHANGES);
+    const statements: InStatement[] = start === 0
+      ? [{ sql: 'INSERT OR IGNORE INTO mihon_sync_clock(user_id,revision) VALUES (?,0)', args: [userId] }]
+      : [];
+    for (const change of chunk) {
+      statements.push({ sql: 'UPDATE mihon_sync_clock SET revision=revision+1 WHERE user_id=?', args: [userId] });
+      statements.push({ sql: `INSERT INTO mihon_sync_records(user_id,store,record_key,data,deleted,client_clock,device_id,revision)
+        VALUES (?,?,?,?,?,?,?,(SELECT revision FROM mihon_sync_clock WHERE user_id=?))
+        ON CONFLICT(user_id,store,record_key) DO UPDATE SET data=excluded.data,deleted=excluded.deleted,client_clock=excluded.client_clock,device_id=excluded.device_id,revision=excluded.revision
+        WHERE excluded.client_clock>mihon_sync_records.client_clock OR (excluded.client_clock=mihon_sync_records.client_clock AND excluded.device_id>mihon_sync_records.device_id)`,
+        args: [userId, change.store, change.key, change.data === null ? null : JSON.stringify(change.data), Number(change.deleted), change.clock, change.deviceId, userId] });
+    }
+    await client.batch(statements, 'write');
+  }
 }
 
 export async function pullChanges(client: Client, userId: string, cursor: number, includePreferences = true) {
   const [clock, result] = await client.batch([
     { sql: 'SELECT revision FROM mihon_sync_clock WHERE user_id=?', args: [userId] },
     { sql: `WITH candidates AS (SELECT store,record_key,data,deleted,client_clock,device_id,revision
-      FROM mihon_sync_records WHERE user_id=? AND revision>? AND (? OR store<>'libraryPreferences') ORDER BY revision LIMIT 1000),
+      FROM mihon_sync_records WHERE user_id=? AND revision>? AND (? OR store<>'libraryPreferences') ORDER BY revision LIMIT 5000),
       page AS (SELECT *, SUM(length(CAST(COALESCE(data,'') AS BLOB))+3*length(CAST(record_key AS BLOB))+320) OVER (ORDER BY revision) AS page_bytes,
       ROW_NUMBER() OVER (ORDER BY revision) AS position FROM candidates)
-      SELECT store,record_key,data,deleted,client_clock,device_id,revision FROM page WHERE page_bytes<=1048576 OR position=1 ORDER BY revision`, args: [userId, cursor, Number(includePreferences)] },
+      SELECT store,record_key,data,deleted,client_clock,device_id,revision FROM page WHERE page_bytes<=3670016 OR position=1 ORDER BY revision`, args: [userId, cursor, Number(includePreferences)] },
   ], 'read');
   const changes: RemoteChange[] = result.rows.map(row => ({
     id: String(row.store) + '\u0000' + String(row.record_key), store: String(row.store) as RemoteChange['store'], key: String(row.record_key),

@@ -61,12 +61,12 @@ async function body(req: IncomingMessage): Promise<Record<string, unknown>> {
     const chunks: Buffer[] = []; let length = 0;
     for await (const chunk of req) {
       const bytes = Buffer.from(chunk); length += bytes.length;
-      if (length > 2 * 1024 * 1024) throw new AccountError('Sync request is too large.', 413);
+      if (length > 4 * 1024 * 1024) throw new AccountError('Sync request is too large.', 413);
       chunks.push(bytes);
     }
     raw = Buffer.concat(chunks).toString('utf8');
   }
-  if (Buffer.byteLength(raw) > 2 * 1024 * 1024) throw new AccountError('Sync request is too large.', 413);
+  if (Buffer.byteLength(raw) > 4 * 1024 * 1024) throw new AccountError('Sync request is too large.', 413);
   try { const value = JSON.parse(raw); if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error(); return value; }
   catch { throw new AccountError('Invalid account request.'); }
 }
@@ -163,7 +163,7 @@ export function createAccountHandler(supplied?: Client) {
         res.setHeader('Set-Cookie', sessionCookie(req, '', true)); write(res, 200, { user: null }); return;
       }
       if (action === 'push') {
-        if (!Array.isArray(input.changes) || input.changes.length > 256 || !input.changes.every(validChange)) throw new AccountError('Invalid library sync records.');
+        if (!Array.isArray(input.changes) || input.changes.length > 4000 || !input.changes.every(validChange)) throw new AccountError('Invalid library sync records.');
         await pushChanges(client, account.id, input.changes); write(res, 200, { saved: input.changes.length }); return;
       }
       throw new AccountError('Unsupported account request.', 404);

@@ -89,9 +89,9 @@ it('keeps users isolated and prevents stale devices from resurrecting removed ti
 });
 it('paginates a large library without skipping records and resolves equal clocks deterministically', async () => {
   const a = await register(); const id = a.data.user.id;
-  const changes = Array.from({ length: 1005 }, (_, i) => ({ ...library(i), key: 'mangadex::hero-' + i, id: syncId('library', 'mangadex::hero-' + i), data: { key: 'mangadex::hero-' + i, category: 'Default', addedAt: 0 } }));
+  const changes = Array.from({ length: 5005 }, (_, i) => ({ ...library(i), key: 'mangadex::hero-' + i, id: syncId('library', 'mangadex::hero-' + i), data: { key: 'mangadex::hero-' + i, category: 'Default', addedAt: 0 } }));
   await pushChanges(client, id, changes);
-  const one = await pullChanges(client, id, 0); expect(one.changes).toHaveLength(1000); expect(one.hasMore).toBe(true);
+  const one = await pullChanges(client, id, 0); expect(one.changes).toHaveLength(5000); expect(one.hasMore).toBe(true);
   const two = await pullChanges(client, id, one.cursor); expect(two.changes).toHaveLength(5); expect(two.hasMore).toBe(false);
   await pushChanges(client, id, [{ ...library(5000), deviceId: 'device-z' }, { ...library(5000, true), deviceId: 'device-a' }]);
   expect((await pullChanges(client, id, two.cursor)).changes[0]?.deleted).toBe(false);
@@ -107,7 +107,7 @@ it('recovers an account with its one-time code, rotates the code, and revokes ol
 });
 it('bounds pull pages by bytes and keeps every large record available on the next page', async () => {
   const created = await register(); const id = created.data.user.id;
-  const changes = Array.from({ length: 16 }, (_, i): SyncChange => {
+  const changes = Array.from({ length: 48 }, (_, i): SyncChange => {
     const key = 'mangadex::large-' + i;
     return { ...library(i), store: 'manga', key, id: syncId('manga', key), data: { key, manga: {
       id: 'large-' + i, sourceId: 'mangadex', title: 'Large record', coverUrl: '', genres: [], description: 'x'.repeat(100000),
@@ -116,7 +116,7 @@ it('bounds pull pages by bytes and keeps every large record available on the nex
   await pushChanges(client, id, changes);
   const one = await pullChanges(client, id, 0);
   expect(one.changes.length).toBeGreaterThan(0); expect(one.changes.length).toBeLessThan(changes.length);
-  expect(Buffer.byteLength(JSON.stringify(one))).toBeLessThan(1100000); expect(one.hasMore).toBe(true);
+  expect(Buffer.byteLength(JSON.stringify(one))).toBeLessThan(3800000); expect(one.hasMore).toBe(true);
   const two = await pullChanges(client, id, one.cursor);
   expect(two.hasMore).toBe(false);
   expect(new Set([...one.changes, ...two.changes].map(change => change.id)).size).toBe(changes.length);

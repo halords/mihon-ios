@@ -41,11 +41,11 @@ function saveLibraryArrangement(arrangement: LibraryArrangement): void {
 }
 
 class SessionError extends Error {}
-async function request(action: string, input?: unknown, accountId?: string) {
+async function request(action: string, input?: unknown, accountId?: string, timeoutMs = 30000) {
   const headers: Record<string, string> = { 'X-Mihon-Request': '1', 'X-Mihon-Sync-Version': '2' };
   if (input !== undefined) headers['Content-Type'] = 'application/json';
   if (accountId) headers['X-Mihon-Account'] = accountId;
-  const response = await fetch('/api/account?action=' + action, { method: input === undefined ? 'GET' : 'POST', credentials: 'same-origin', cache: 'no-store', headers, ...(input !== undefined ? { body: JSON.stringify(input) } : {}), signal: AbortSignal.timeout(30000) });
+  const response = await fetch('/api/account?action=' + action, { method: input === undefined ? 'GET' : 'POST', credentials: 'same-origin', cache: 'no-store', headers, ...(input !== undefined ? { body: JSON.stringify(input) } : {}), signal: AbortSignal.timeout(timeoutMs) });
   const data = await response.json();
   if (!response.ok) {
     if ((response.status === 401 || response.status === 409) && accountId) throw new SessionError(data.error ?? 'Sign in again to continue syncing.');
@@ -87,12 +87,31 @@ export async function acknowledgeChanges(sent: SyncRecord[], userId: string): Pr
   if ((await tx.objectStore('syncControl').get('owner'))?.value !== userId) {
     tx.abort(); await tx.done.catch(() => {}); throw new SessionError('The active account changed.');
   }
+  // One bulk read for the whole batch, then queued native puts completed
+  // by tx.done (was: a get+put awaited per record — ~2 round trips per
+  // record on top of the upload itself). The guard is unchanged: a record
+  // is marked synced only if its clock and device still match what was
+  // sent, so a record edited mid-flight stays pending.
+  const current = new Map((await tx.objectStore('syncRecords').getAll()).map(record => [record.id, record]));
+  const store = unwrap(tx.objectStore('syncRecords'));
   for (const record of sent) {
-    const current = await tx.objectStore('syncRecords').get(record.id);
-    if (current?.clock === record.clock && current.deviceId === record.deviceId) await tx.objectStore('syncRecords').put({ ...current, pending: false });
+    const existing = current.get(record.id);
+    if (existing?.clock === record.clock && existing.deviceId === record.deviceId) store.put({ ...existing, pending: false });
   }
   await tx.done;
 }
+// Queue every get on the native store up front; the transaction works
+// through them in order and Promise.all settles with the last one. One
+// pass through the request queue instead of an awaited round trip per
+// record (SYNC-REVISION-SPEC.md).
+function nativeGetAll(store: IDBObjectStore, keys: IDBValidKey[]): Promise<unknown[]> {
+  return Promise.all(keys.map(key => new Promise<unknown>((resolve, reject) => {
+    const request = store.get(key);
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  })));
+}
+
 export async function applyRemoteChanges(changes: RemoteChange[], cursor: number, userId: string): Promise<void> {
   // Persist a just-selected sort before comparing it with an in-flight pull.
   await preferencesWrite;
@@ -102,32 +121,51 @@ export async function applyRemoteChanges(changes: RemoteChange[], cursor: number
   if (owner !== userId) { tx.abort(); await tx.done.catch(() => {}); throw new SessionError('The active account changed.'); }
   let clock = Number((await tx.objectStore('syncControl').get('clock'))?.value ?? 0);
   const removals = new Set<string>();
+  // Bulk merge: read everything the decisions need in queued passes, then
+  // queue every write natively and let tx.done be the completion barrier.
+  // Record ids are unique within a page, so the maps cannot go stale
+  // mid-loop, and native requests execute in issue order — the result is
+  // identical to the old per-change awaited path, in a fraction of the
+  // round trips.
+  const nativeStores = new Map<string, IDBObjectStore>();
+  const nativeStore = (name: string): IDBObjectStore => {
+    const existing = nativeStores.get(name);
+    if (existing) return existing;
+    const raw: object = tx.objectStore(name as never);
+    const store = unwrap(raw as never) as unknown as IDBObjectStore;
+    nativeStores.set(name, store);
+    return store;
+  };
+  const localRows = await nativeGetAll(nativeStore('syncRecords'), changes.map(change => change.id));
+  const locals = new Map(changes.map((change, i) => [change.id, localRows[i] as SyncRecord | undefined]));
+  const stateKeys = changes.filter(change => change.store === 'chapterState' && !change.deleted).map(change => change.key);
+  const stateRows = await nativeGetAll(nativeStore('chapterState'), stateKeys);
+  const previousStates = new Map(stateKeys.map((key, i) => [key, stateRows[i] as { downloaded?: boolean } | undefined]));
   for (const change of changes) {
     clock = Math.max(clock, change.clock);
-    const local = await tx.objectStore('syncRecords').get(change.id);
+    const local = locals.get(change.id);
     if (local && newer(local, change)) continue;
     if (change.store === 'library') {
       if (change.deleted) {
-        await tx.objectStore('metadata').put({ key: downloadRemovalKey(change.key), value: { pending: true } });
+        nativeStore('metadata').put({ key: downloadRemovalKey(change.key), value: { pending: true } });
         removals.add(change.key);
       } else {
-        await tx.objectStore('metadata').delete(downloadRemovalKey(change.key));
+        nativeStore('metadata').delete(downloadRemovalKey(change.key));
         removals.delete(change.key);
       }
     }
-    if (change.deleted) await tx.objectStore(change.store).delete(change.key);
+    if (change.deleted) nativeStore(change.store).delete(change.key);
     else {
       let value = change.data!;
       if (change.store === 'chapterState') {
-        const previous = await tx.objectStore('chapterState').get(change.key);
-        value = { ...value, downloaded: previous?.downloaded ?? false };
+        value = { ...value, downloaded: previousStates.get(change.key)?.downloaded ?? false };
       }
-      await tx.objectStore(change.store).put(value as never);
+      nativeStore(change.store).put(value);
     }
-    await tx.objectStore('syncRecords').put({ ...change, pending: false });
+    nativeStore('syncRecords').put({ ...change, pending: false });
   }
-  await tx.objectStore('syncControl').put({ key: 'clock', value: clock });
-  await tx.objectStore('syncControl').put({ key: 'cursor', value: cursor });
+  nativeStore('syncControl').put({ key: 'clock', value: clock });
+  nativeStore('syncControl').put({ key: 'cursor', value: cursor });
   await tx.done; observeSyncClock(clock);
   for (const key of removals) await (await import('./libraryFiles')).purgeMangaFiles(key);
   if (changes.some(change => change.store === 'libraryPreferences')) await restoreLibraryArrangement();
@@ -157,24 +195,30 @@ async function cycle(): Promise<void> {
     const db = await getRawDB();
     if ((await db.get('syncControl', 'owner'))?.value !== accountId) throw new SessionError('The active account changed.');
     const pending = (await db.getAll('syncRecords')).filter(record => record.pending);
-    // Batches stay below serverless request limits even for large libraries.
+    // Batches are sized by exact serialized bytes (SYNC-REVISION-SPEC.md):
+    // up to 4,000 records or 3.5 MB per request, whichever comes first —
+    // under the server's 4 MB cap, which is under Vercel's 4.5 MB limit.
+    // Still strictly sequential: send, acknowledge, publish the new
+    // pending count, then the next batch.
+    const encoder = new TextEncoder();
     for (let start = 0; start < pending.length;) {
       if (generation !== currentGeneration) return;
-      const batch: SyncRecord[] = []; let bytes = 0;
-      while (start < pending.length && batch.length < 256) {
-        const record = pending[start]!; const size = JSON.stringify(record).length * 3;
-        if (batch.length && bytes + size > 1024 * 1024) break;
+      const batch: SyncRecord[] = []; let bytes = 16; // {"changes":[]} envelope
+      while (start < pending.length && batch.length < 4000) {
+        const record = pending[start]!; const size = encoder.encode(JSON.stringify(record)).length + 1;
+        if (batch.length && bytes + size > 3.5 * 1024 * 1024) break;
         if (!validChange(record)) throw new Error('A local record cannot be synced. Export your library and report this error.');
         batch.push(record); bytes += size; start++;
       }
-      await request('push', { changes: batch }, accountId);
+      await request('push', { changes: batch }, accountId, 120000);
       if (generation !== currentGeneration) return;
       await acknowledgeChanges(batch, accountId);
+      await summary();
     }
     let cursor = Number((await db.get('syncControl', 'cursor'))?.value ?? 0);
     for (;;) {
       if (generation !== currentGeneration) return;
-      const result = await request('pull&cursor=' + cursor, undefined, accountId);
+      const result = await request('pull&cursor=' + cursor, undefined, accountId, 120000);
       if (generation !== currentGeneration) return;
       if (!Array.isArray(result.changes) || result.cursor < cursor || result.hasMore && result.cursor <= cursor) throw new Error('The server returned an invalid sync page.');
       await applyRemoteChanges(result.changes, result.cursor, accountId);
