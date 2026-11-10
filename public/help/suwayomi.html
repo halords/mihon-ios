@@ -22,7 +22,7 @@
   <ol>
     <li>On a computer with Docker, open the <a href="https://github.com/halords/mihon-ios" target="_blank" rel="noopener noreferrer">PWA repository</a>. Copy <code>.env.example</code> to <code>.env</code> and choose <code>SUWAYOMI_PASSWORD</code>.</li>
     <li>Run <code>docker compose up --build -d</code>. Open <code>http://localhost:4567</code> on that computer and sign in with username <code>reader</code> and your chosen password.</li>
-    <li>In Suwayomi’s WebUI, add an extension repository you trust and install the sources used by your Mihon library.</li>
+    <li>In the PWA, open Browse → Extensions. Add the stores retained from your Mihon backup, or enter a trusted store URL. Install the sources used by your library.</li>
     <li>In this app’s Connections, enter those credentials and choose <strong>Use bundled server</strong>.</li>
   </ol>
   <p class="muted">For an existing server, enter its HTTPS URL instead. Basic authentication is supported. For authenticated backup uploads, use the bundled proxy or restore the original file through Suwayomi’s WebUI.</p>

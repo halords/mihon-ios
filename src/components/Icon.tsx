@@ -1,6 +1,7 @@
 const paths = {
   back: 'm15 18-6-6 6-6', search: 'm21 21-4.5-4.5 M19 10.5a8.5 8.5 0 1 1-17 0 8.5 8.5 0 0 1 17 0',
   filter: 'M4 7h16M7 12h10M10 17h4', more: 'M5 12h.01M12 12h.01M19 12h.01',
+  sort: 'M4 5h10M4 10h7M4 15h4M18 4v16m-3-3 3 3 3-3',
   refresh: 'M20 4v5h-5M4 20v-5h5M4.5 9a8 8 0 0 1 13.2-3L20 9M19.5 15a8 8 0 0 1-13.2 3L4 15',
   download: 'M12 3v12m-5-5 5 5 5-5M4 16v4h16v-4', pause: 'M9 5v14M15 5v14', play: 'm8 4 12 8-12 8Z',
   check: 'm5 12 4 4L19 6', close: 'm6 6 12 12M6 18 18 6',

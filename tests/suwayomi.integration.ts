@@ -10,6 +10,7 @@ import { connectSuwayomi, sendBackupToServer, setBackendAuth } from '../src/lib/
 import { getArchives, getChapterMetas, getChapterState, getDB } from '../src/lib/db';
 import { downloadChapter, getCachedPageList, pageCacheKey, PAGES_CACHE } from '../src/lib/downloads';
 import { getSource } from '../src/sources';
+import { createMihonBackup } from '../src/backup/export';
 
 it('restores a Mihon archive through live Suwayomi and downloads its chapter for offline reading', async () => {
   const base = process.env.SUWAYOMI_TEST_URL;
@@ -48,7 +49,8 @@ it('restores a Mihon archive through live Suwayomi and downloads its chapter for
     bytes(101, concat(string(1, 'Local source'), integer(2, 0))),
   );
   await restoreTachibk(await inspectTachibkFile(new File([gzipSync(wire)], 'server-contract.tachibk')));
-  await sendBackupToServer((await getArchives())[0]!);
+  const generated = await createMihonBackup();
+  await sendBackupToServer({ ...(await getArchives())[0]!, name: 'generated-pwa.tachibk', bytes: generated.file });
   const source = getSource('0')!;
   expect((await source.getMangaDetails(title)).title).toBe(title);
   const chapters = await source.getChapterList(title);

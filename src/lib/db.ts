@@ -274,7 +274,10 @@ export async function putChapterMetas(
     const key = chapterKey(sourceId, mangaId, chapter.id);
     const previous = await tx.store.get(key);
     const defined = Object.fromEntries(Object.entries(chapter).filter(([, v]) => v !== undefined));
-    await tx.store.put({ key, mangaKey: parentKey, chapter: { ...previous?.chapter, ...defined } as SChapter });
+    await tx.store.put({ key, mangaKey: parentKey, chapter: {
+      ...previous?.chapter, ...defined,
+      dateFetch: chapter.dateFetch ?? previous?.chapter.dateFetch ?? Date.now(),
+    } as SChapter });
   }
   await tx.done;
 }

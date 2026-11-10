@@ -18,7 +18,7 @@ docker compose up --build -d
 
 Open **http://localhost:4567** on the Docker host and sign in. The included image is pinned to Suwayomi **v2.4.2366**. Its data and extensions live in the `suwayomi-data` volume. The PWA is served at **http://localhost:4173**, with the backend mounted at `/api/suwayomi`.
 
-In Suwayomi’s WebUI, add a trusted extension repository and install the sources used by your Mihon backup. Repository formats and signed extension IDs must match the compatible extensions; the PWA does not convert Android APKs into JavaScript. `SUWAYOMI_EXTENSION_STORES` can also be set to a JSON array of repository URLs in `.env` before starting the container.
+After connecting the PWA, open **Browse → Extensions → Mihon extensions**. Add an extension store using its HTTPS `index.pb` or `repo.json` URL, or use **Add store** beside the stores retained from your Mihon backup. Refresh the catalog, search by source or language, and install the extensions you need. Updates and uninstall are available on the same screen. Suwayomi's WebUI remains an alternative. `SUWAYOMI_EXTENSION_STORES` can also be set to a JSON array of store URLs in `.env` before starting the container.
 
 In the PWA, open **Connections**, enter your chosen username/password under **Authentication**, and choose **Use bundled server**. Refresh sources after installing extensions. Credentials are held for that browser session and are excluded from library exports. The proxy preserves the server’s scoped session/CSRF cookies for authenticated backup uploads.
 
@@ -66,7 +66,7 @@ Alternatively, enter Suwayomi’s own **HTTPS** address in Connections. It must 
 ## Restore the original source URLs
 
 1. In the PWA, import your actual nonempty `.tachibk` under **Backup & restore**. Review the source list and restore it.
-2. In Suwayomi’s WebUI, install matching extensions for the missing sources. Match their exact numeric source IDs; similarly named extensions or different languages can have different IDs.
+2. In **Browse → Extensions**, add your saved stores and install matching extensions for the missing sources. **Browse → Sources** lists the IDs needed by your library. Match exact numeric source IDs; similarly named extensions or different languages can have different IDs.
 3. Connect from the PWA and refresh sources.
 4. Choose **Copy to server** beside the original archive in Connections. This explicitly merges that archive into your configured server. Local data is retained if the server restoration fails.
 5. Open a title, refresh its chapter list, and download the chapters you want on the device.
@@ -81,6 +81,10 @@ A Mihon backup contains chapter metadata, not image files. To transfer existing 
 
 Files imported this way are available offline immediately and can be read even when their original extension is missing. Downloaded PWA chapters can be exported as CBZ from Downloads. A PWA JSON export contains metadata and original archives; move the CBZ files as well when changing devices.
 
+## Return to Android
+
+In **More → Backup & restore**, choose **Export for Mihon Android (.tachibk)**. This creates a new backup with the PWA's current reading state, library, categories and compatible source IDs. Install matching extensions in Mihon and restore the generated file. Export chapter images separately as CBZ. Keep JSON for browser-only sources or migrate them to a compatible source before generating the Android backup. Original archives remain separately available without modification.
+
 ## Vercel
 
 The repository includes functions for `/api/proxy` and `/api/suwayomi`, plus nested-route rewrites in `vercel.json`. Set `SUWAYOMI_URL` to an address reachable by Vercel’s servers. Set credentials in Connections when the upstream server uses Basic authentication.
@@ -91,7 +95,7 @@ Vercel function request/response limits apply before the proxy runs. A large `.t
 
 | Symptom | Action |
 | --- | --- |
-| Connection works but no sources appear | Install extensions in Suwayomi’s WebUI, then refresh sources in Connections. Local source may be the only source on a new server. |
+| Connection works but no sources appear | Add an extension store under Browse → Extensions, refresh the catalog, then install the sources you need. Source availability refreshes automatically. Local source may be the only source on a new server. |
 | A restored title cannot resolve | Copy the original archive to that server, verify the exact source ID is installed, or migrate the title to an available source. |
 | Authentication fails | Enter Basic credentials. For backup uploads, use the bundled connection so the server’s session/CSRF cookies remain same-origin. |
 | HTTPS app rejects an HTTP server URL | Put Suwayomi behind HTTPS or use the bundled HTTPS app proxy. |

@@ -3,10 +3,12 @@ import { getSource } from '../sources';
 import { coverArt } from '../sources/svgArt';
 import { dispatchDataEvent, getCategories, getDB, libraryCategories, type CategoryRecord } from '../lib/db';
 import { saveSettings, type ReaderMode } from '../lib/settings';
+import { mihonLibrarySort } from '../lib/librarySort';
 import { blobPart } from '../lib/bytes';
 import { parseTachibk } from './parser';
 import { gunzipIfNeeded } from './compression';
 import { jsonSafe, type ParsedBackup, type ParsedManga } from './models';
+import { unwrap } from 'idb';
 
 export { parseTachibk } from './parser';
 export { gunzipIfNeeded } from './compression';
@@ -114,6 +116,19 @@ export async function restoreTachibk(preview: TachibkPreview, options: RestoreOp
   const db = await getDB();
   const tx = db.transaction(['manga', 'chapterMeta', 'chapterState', 'library', 'history', 'categories', 'metadata', 'archives'], 'readwrite');
   try {
+    // Queue chapter writes together. A request/await round trip for every
+    // chapter makes large Android backups take many minutes in WebKit.
+    // Read existing state once inside this same atomic transaction.
+    const [oldStates, oldHistory] = await Promise.all([
+      tx.objectStore('chapterState').getAll(), tx.objectStore('history').getAll(),
+    ]);
+    const states = new Map(oldStates.map(state => [state.key, state]));
+    const histories = new Map(oldHistory.map(history => [history.key, history]));
+    // Native requests bubble failures to tx.done. They avoid creating a
+    // promise/success callback for every one of thousands of chapter writes.
+    const chapterStore = unwrap(tx.objectStore('chapterMeta'));
+    const stateStore = unwrap(tx.objectStore('chapterState'));
+    const historyStore = unwrap(tx.objectStore('history'));
     for (const category of categories) await tx.objectStore('categories').put(category);
     for (const [index, pm] of backup.manga.entries()) {
       const sourceName = names.get(pm.source.toString()) ?? (pm.source === 0n ? 'Local files' : `Source ${pm.source}`);
@@ -145,14 +160,16 @@ export async function restoreTachibk(preview: TachibkPreview, options: RestoreOp
           dateUpload: pc.dateUpload, dateFetch: pc.dateFetch, scanlator: pc.scanlator, sourceOrder: pc.sourceOrder, memo: pc.memo,
         };
         chapterByUrl.set(pc.url, { chapter, key: cKey, lastPage: pc.lastPageRead });
-        await tx.objectStore('chapterMeta').put({ key: cKey, mangaKey: key, chapter });
-        const old = await tx.objectStore('chapterState').get(cKey);
+        chapterStore.put({ key: cKey, mangaKey: key, chapter });
+        const old = states.get(cKey);
         const newer = (old?.lastReadAt ?? 0) > (backupReadAt.get(pc.url) ?? 0);
-        await tx.objectStore('chapterState').put({
+        const restoredState = {
           ...old, key: cKey, mangaKey: key,
           read: newer ? old!.read : pc.read || !!old?.read, bookmark: pc.bookmark || !!old?.bookmark,
           lastPage: newer ? old!.lastPage : Math.max(pc.lastPageRead, old?.lastPage ?? 0), downloaded: old?.downloaded ?? false,
-        });
+        };
+        states.set(cKey, restoredState);
+        stateStore.put(restoredState);
       }
       if (pm.favorite) {
         const categoryNames = [...new Set(pm.categories.map(id => byOrder.get(id.toString()) ?? byId.get(id.toString())).filter((v): v is string => !!v))];
@@ -169,15 +186,23 @@ export async function restoreTachibk(preview: TachibkPreview, options: RestoreOp
           const id = dex ? extractUuid(h.url) ?? h.url : h.url;
           const chapter: SChapter = { id, mangaId, name: 'Imported chapter', url: h.url, number: -1, dateUpload: 0 };
           pair = { chapter, key: chapterKey(sourceId, mangaId, id), lastPage: 0 };
-          await tx.objectStore('chapterMeta').put({ key: pair.key, mangaKey: key, chapter });
+          chapterStore.put({ key: pair.key, mangaKey: key, chapter });
         }
-        const old = await tx.objectStore('history').get(pair.key);
-        if (!old || h.lastRead > old.updatedAt) await tx.objectStore('history').put({
-          key: pair.key, mangaKey: key, mangaTitle: title, coverUrl: manga.coverUrl,
-          chapterName: pair.chapter.name, page: pair.lastPage, updatedAt: h.lastRead, readDuration: h.readDuration,
-        });
-        const state = await tx.objectStore('chapterState').get(pair.key);
-        if (state) await tx.objectStore('chapterState').put({ ...state, lastReadAt: Math.max(h.lastRead, state.lastReadAt ?? 0) });
+        const old = histories.get(pair.key);
+        if (!old || h.lastRead > old.updatedAt) {
+          const history = {
+            key: pair.key, mangaKey: key, mangaTitle: title, coverUrl: manga.coverUrl,
+            chapterName: pair.chapter.name, page: pair.lastPage, updatedAt: h.lastRead, readDuration: h.readDuration,
+          };
+          histories.set(pair.key, history);
+          historyStore.put(history);
+        }
+        const state = states.get(pair.key);
+        if (state) {
+          const restoredState = { ...state, lastReadAt: Math.max(h.lastRead, state.lastReadAt ?? 0) };
+          states.set(pair.key, restoredState);
+          stateStore.put(restoredState);
+        }
         result.historyCount++;
       }
       options.onProgress?.(index + 1, backup.manga.length);
@@ -200,6 +225,8 @@ export async function restoreTachibk(preview: TachibkPreview, options: RestoreOp
     const viewer = backup.preferences.find(p => p.key === 'pref_default_viewer_key');
     const mode = viewer ? readerModeFromFlags(Number(viewer.value)) : undefined;
     if (mode) saveSettings({ readerMode: mode });
+    const sort = mihonLibrarySort(backup.preferences.find(p => p.key === 'library_sorting_mode')?.value);
+    if (sort) saveSettings(sort);
   }
   dispatchDataEvent();
   return result;

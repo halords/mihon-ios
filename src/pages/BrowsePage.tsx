@@ -4,11 +4,12 @@ import Icon from '../components/Icon';
 import Sheet from '../components/Sheet';
 import { EmptyState } from '../components/Feedback';
 import { loadBrowseState, saveBrowseState } from '../lib/browseState';
-import { addToLibrary, getCategories, getLibrary, libraryCategories, putManga, removeFromLibrary, setLibraryCategory } from '../lib/db';
+import { addToLibrary, getAllManga, getCategories, getLibrary, libraryCategories, putManga, removeFromLibrary, setLibraryCategory } from '../lib/db';
 import { useDataEvents, useOnline, useSettings, useSources } from '../lib/hooks';
 import { useLoad } from '../lib/useLoad';
 import { useNav } from '../lib/nav';
 import { mangaKey, type SManga, type Source } from '../sources/Source';
+import { ExtensionPanels } from './ExtensionsPage';
 
 interface Group { id: string; name: string; items: SManga[]; page: number; loading: boolean; exhausted: boolean; error?: string }
 export default function BrowsePage() {
@@ -17,6 +18,9 @@ export default function BrowsePage() {
   const settings = useSettings();
   const sources = useSources();
   const [initial] = useState(loadBrowseState);
+  const [panel, setPanel] = useState<'titles' | 'sources' | 'extensions'>(initial ? 'titles' : 'sources');
+  const [sourceQuery, setSourceQuery] = useState('');
+  const [sourceLanguage, setSourceLanguage] = useState('all');
   const [sourceId, setSourceId] = useState(initial?.sourceId ?? 'mangadex');
   const [mode, setMode] = useState<'popular' | 'latest'>(initial?.mode ?? 'popular');
   const [query, setQuery] = useState(initial?.query ?? '');
@@ -31,7 +35,16 @@ export default function BrowsePage() {
   const restore = useRef(initial);
   const scrollY = useRef(initial?.scrollY ?? 0);
   const latest = useRef({ query: search, mode, sourceId, items: [] as SManga[], pages: {} as Record<string, number>, exhausted: {} as Record<string, boolean>, scrollY: 0 });
-  const { data, reload } = useLoad(async () => ({ library: await getLibrary(), categories: await getCategories() }), []);
+  const { data, reload } = useLoad(async () => {
+    const [library, categories, manga] = await Promise.all([getLibrary(), getCategories(), getAllManga()]);
+    const keys = new Set(library.map(m => m.key));
+    const imported = new Map<string, { id: string; name: string; count: number }>();
+    for (const m of manga.filter(m => keys.has(m.key))) {
+      const entry = imported.get(m.manga.sourceId) ?? { id: m.manga.sourceId, name: m.manga.sourceName ?? m.manga.sourceId, count: 0 };
+      entry.count++; imported.set(entry.id, entry);
+    }
+    return { library, categories, imported: [...imported.values()] };
+  }, []);
   useDataEvents(reload);
   const sourceStamp = sources.map(s => s.id + ':' + s.kind).join('|');
   const library = new Map(data?.library.map(entry => [entry.key, entry]) ?? []);
@@ -62,6 +75,7 @@ export default function BrowsePage() {
 
   useEffect(() => {
     const token = ++generation.current;
+    if (panel !== 'titles') return;
     const targets = sourceId === 'all' ? sources : sources.filter(s => s.id === sourceId);
     const saved = restore.current;
     restore.current = null;
@@ -77,7 +91,7 @@ export default function BrowsePage() {
       for (let i = 0; i < targets.length && generation.current === token; i += 4) await Promise.allSettled(targets.slice(i, i + 4).map(source => loadSource(source, 1, token)));
     })();
     return () => { generation.current++; };
-  }, [sourceId, mode, search, sourceStamp, attempt, loadSource]);
+  }, [panel, sourceId, mode, search, sourceStamp, attempt, loadSource]);
 
   useEffect(() => {
     latest.current = { query: search, mode, sourceId, items: groups.flatMap(g => g.items), pages: Object.fromEntries(groups.map(g => [g.id, g.page])), exhausted: Object.fromEntries(groups.map(g => [g.id, g.exhausted])), scrollY: scrollY.current };
@@ -101,7 +115,17 @@ export default function BrowsePage() {
     finally { setBusy(false); }
   }
   return <main className="screen">
-    <header className="topbar"><h1>Browse</h1><button className="icon-btn" aria-label="Refresh browse results" disabled={!online || groups.some(g => g.loading)} onClick={() => setAttempt(v => v + 1)}><Icon name="refresh" /></button><button className="icon-btn" aria-label="Connect more sources" onClick={nav.openConnections}><Icon name="cloud" /></button></header>
+    <header className="topbar"><h1>Browse</h1>{panel === 'titles' && <button className="icon-btn" aria-label="Refresh browse results" disabled={!online || groups.some(g => g.loading)} onClick={() => setAttempt(v => v + 1)}><Icon name="refresh" /></button>}<button className="icon-btn" aria-label="Connect more sources" onClick={nav.openConnections}><Icon name="cloud" /></button></header>
+    <div className="seg" aria-label="Browse sections"><button aria-pressed={panel === 'sources'} onClick={() => setPanel('sources')}>Sources <span>{sources.length}</span></button><button aria-pressed={panel === 'extensions'} onClick={() => setPanel('extensions')}>Extensions</button><button aria-pressed={panel === 'titles'} onClick={() => setPanel('titles')}>Titles</button></div>
+    {panel === 'extensions' && <ExtensionPanels />}
+    {panel === 'sources' && <>
+      <div className="searchbar"><Icon name="search" /><input type="search" aria-label="Search sources" placeholder="Find a source" value={sourceQuery} onChange={e => setSourceQuery(e.target.value)} /></div>
+      <div className="browse-toolbar"><select aria-label="Source language" value={sourceLanguage} onChange={e => setSourceLanguage(e.target.value)}><option value="all">All languages</option>{[...new Set(sources.map(s => s.lang ?? 'all'))].filter(l => l !== 'all').sort().map(lang => <option key={lang} value={lang}>{lang.toUpperCase()}</option>)}</select></div>
+      <div className="section-heading"><h3>Available sources</h3><button className="text-btn" onClick={() => setPanel('extensions')}><Icon name="plus" size={16} />Add sources</button></div>
+      {[...sources].sort((a, b) => a.name.localeCompare(b.name)).filter(s => `${s.name} ${s.lang ?? ''}`.toLowerCase().includes(sourceQuery.toLowerCase()) && (sourceLanguage === 'all' || s.lang === sourceLanguage)).map(source => <button className="source-browse-row" key={source.id} aria-label={`Browse ${source.name}${source.lang ? ' ' + source.lang.toUpperCase() : ''}`} onClick={() => { setSourceId(source.id); setPanel('titles'); setQuery(''); setSearch(''); }}><span className="extension-avatar"><Icon name="browse" /></span><span><strong>{source.name}</strong><small>{source.lang?.toUpperCase() ?? 'All languages'} · {source.kind === 'suwayomi' ? 'Mihon extension' : source.kind === 'extension' ? 'Web extension' : source.id === 'sample' ? 'Demo' : 'Built in'}</small></span><Icon name="chevron" size={18} /></button>)}
+      {!!data?.imported.some(s => !sources.some(available => available.id === s.id) && !['local', '0'].includes(s.id)) && <section className="settings-card"><h3>Sources needed by your library</h3>{data.imported.filter(s => !sources.some(available => available.id === s.id) && !['local', '0'].includes(s.id)).map(source => <div className="source-review-row" key={source.id}><div><strong>{source.name}</strong><small>{source.count} library titles · {source.id}</small></div><span className="chip">Needs extension</span></div>)}<button className="text-btn" onClick={() => setPanel('extensions')}>Find extensions <Icon name="arrow" size={16} /></button></section>}
+    </>}
+    {panel === 'titles' && <>
     <div className="browse-toolbar"><select aria-label="Browse source" value={sourceId} onChange={e => setSourceId(e.target.value)}><option value="all">All sources</option>{!sources.some(s => s.id === sourceId) && sourceId !== 'all' && <option value={sourceId}>Source unavailable</option>}{sources.map(s => <option key={s.id} value={s.id}>{s.name}{s.lang ? ' (' + s.lang.toUpperCase() + ')' : ''}{s.id === 'sample' ? ' · demo' : ''}</option>)}</select></div>
     <div className="searchbar"><Icon name="search" /><input type="search" aria-label="Search manga" placeholder="Search titles" value={query} onChange={e => setQuery(e.target.value)} /></div>
     {!search && <div className="seg" aria-label="Browse mode"><button className={mode === 'popular' ? 'active' : ''} aria-pressed={mode === 'popular'} onClick={() => setMode('popular')}>Popular</button><button className={mode === 'latest' ? 'active' : ''} aria-pressed={mode === 'latest'} onClick={() => setMode('latest')}>Latest</button></div>}
@@ -116,6 +140,7 @@ export default function BrowsePage() {
         {group.loading ? <div className="spinner" role="status" aria-label={'Loading ' + group.name} /> : !items.length && !group.error ? <EmptyState icon="search" title="No titles found"><p>Try another search or source.</p></EmptyState> : items.length > 0 && source && !group.exhausted && <div className="load-more"><button className="btn-ghost outlined" disabled={!online} onClick={() => void loadSource(source, group.page + 1, generation.current)}>Load more</button></div>}
       </section>;
     })}
+    </>}
     {menuItem && <Sheet title={menuItem.title} onClose={() => setMenuKey('')}>
       {menuError && <p className="error" role="alert">{menuError}</p>}
       <p className="muted">Save this title to one or more library categories.</p>

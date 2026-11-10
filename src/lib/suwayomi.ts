@@ -67,7 +67,7 @@ export async function serverGraphql<T>(query: string, variables: Record<string, 
   if (response.status === 401 || response.status === 403) { void response.body?.cancel(); throw new Error('Suwayomi requires authentication. Enter server credentials in Connections.'); }
   if (!response.ok) { void response.body?.cancel(); throw new Error(`Suwayomi request failed (HTTP ${response.status})`); }
   const result = parseServerJson(await response.text()) as { data?: T; errors?: { message: string }[]; error?: string };
-  if (result.errors?.length) throw new Error(result.errors.map(e => e.message).join(' · '));
+  if (result.errors?.length) throw new Error(result.errors.map(e => e.message.split('\n')[0]!.replace(/^Exception while fetching data \([^)]*\)\s*:\s*/, '')).join(' · '));
   if (!result.data) throw new Error(result.error ?? 'The server did not return GraphQL data. Check the Suwayomi URL.');
   return result.data;
 }

@@ -95,6 +95,7 @@ test('preserves scroll offsets inside the first page after an offline reload', a
 });
 test('downloads chapters from a source, persists its queue, and reads them offline', async ({ page, context }, info) => {
   await page.goto('/#/browse');
+  await page.getByRole('button', { name: 'Titles', exact: true }).click();
   await page.getByLabel('Browse source').selectOption('sample');
   await page.getByRole('button', { name: 'Open Starfall Blade' }).click();
   await page.getByRole('button', { name: 'Add to library', exact: true }).click();
@@ -115,6 +116,7 @@ test('downloads chapters from a source, persists its queue, and reads them offli
 test('keeps working browse results when another source fails', async ({ page, context }) => {
   await context.route('**/api/proxy?*', route => route.fulfill({ status: 502, contentType: 'application/json', body: '{"error":"Unavailable test source"}' }));
   await page.goto('/#/browse');
+  await page.getByRole('button', { name: 'Titles', exact: true }).click();
   await page.getByLabel('Browse source').selectOption('all');
   await expect(page.getByRole('button', { name: 'Open Starfall Blade' })).toBeVisible();
   await expect(page.getByRole('alert')).toContainText('HTTP 502');
@@ -147,12 +149,14 @@ test('installs relative extension indexes and retains class methods and private 
   await writeFile(resolve(folder, 'source.mjs'), module);
   try {
   await page.goto('/#/extensions');
+  await page.getByRole('button', { name: 'Web extensions', exact: true }).click();
   await page.locator('input[type="url"]').fill(`/__test/${info.project.name}/class-extension/index.json`);
   await page.getByRole('button', { name: 'Add', exact: true }).click();
   const index = page.locator('section').filter({ has: page.getByRole('heading', { name: 'Class fixture index' }) });
   await index.getByRole('button', { name: 'Install', exact: true }).click();
   await expect(page.getByRole('status')).toContainText('Installed Prototype source');
   await page.goto('/#/browse');
+  await page.getByRole('button', { name: 'Titles', exact: true }).click();
   await page.getByLabel('Browse source').selectOption('prototype-source');
   await page.getByRole('button', { name: 'Open Prototype Hero' }).click();
   await page.getByRole('button', { name: 'Add to library', exact: true }).click();

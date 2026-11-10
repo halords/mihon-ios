@@ -11,6 +11,8 @@ import { useDataEvents, useSettings } from '../lib/hooks';
 import { useLoad } from '../lib/useLoad';
 import { getSource } from '../sources';
 import { enqueueChapters } from '../lib/downloadQueue';
+import { compareLibraryItems, LIBRARY_SORT_OPTIONS } from '../lib/librarySort';
+import LibrarySortControls from '../components/LibrarySortControls';
 
 async function loadLibrary() {
   const db = await getDB();
@@ -34,7 +36,12 @@ async function loadLibrary() {
     return [{ entry, stored: manga, chapters,
       unread: chapters.filter(c => !state.get(c.key)?.read).length,
       downloaded: chapters.filter(c => downloaded.has(c.key)).length,
-      bookmarked: chapters.some(c => state.get(c.key)?.bookmark), lastRead: lastRead.get(entry.key) ?? 0 }];
+      bookmarked: chapters.some(c => state.get(c.key)?.bookmark), lastRead: lastRead.get(entry.key) ?? 0,
+      sort: { key: entry.key, title: manga.manga.title, added: entry.addedAt, read: lastRead.get(entry.key) ?? 0,
+        unread: chapters.filter(c => !state.get(c.key)?.read).length, chapters: chapters.length,
+        updated: Math.max(0, ...chapters.map(c => c.chapter.dateFetch ?? 0)),
+        latest: Math.max(0, ...chapters.map(c => c.chapter.dateUpload)),
+        fetched: Math.max(0, ...chapters.map(c => c.chapter.dateFetch ?? 0)) } }];
   });
   const resume = [...history].sort((a, b) => b.updatedAt - a.updatedAt).find(h => {
     const manga = stored.get(h.mangaKey);
@@ -54,7 +61,7 @@ export default function LibraryPage() {
   const [query, setQuery] = useState('');
   const [showSearch, setShowSearch] = useState(false);
   const [filter, setFilter] = useState<Filter>('all');
-  const [sheet, setSheet] = useState<'filters' | 'categories' | 'more' | null>(null);
+  const [sheet, setSheet] = useState<'filters' | 'sort' | 'categories' | 'more' | null>(null);
   const [selecting, setSelecting] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [categorySelection, setCategorySelection] = useState<string[]>([]);
@@ -68,11 +75,7 @@ export default function LibraryPage() {
       filter === 'completed' && (item.unread > 0 || !item.chapters.length) || filter === 'bookmarked' && !item.bookmarked ||
       filter === 'missing' && getSource(item.stored.manga.sourceId)) return false;
     return true;
-  }).sort((a, b) => {
-    const value = settings.librarySort === 'added' ? b.entry.addedAt - a.entry.addedAt : settings.librarySort === 'read' ? b.lastRead - a.lastRead :
-      settings.librarySort === 'unread' ? b.unread - a.unread : a.stored.manga.title.localeCompare(b.stored.manga.title, undefined, { numeric: true });
-    return settings.sortDescending ? -value : value;
-  });
+  }).sort((a, b) => compareLibraryItems(a.sort, b.sort, settings));
   const cards: MangaListItem[] = visible.map(item => ({ key: item.entry.key, manga: item.stored.manga, unread: item.unread, downloaded: item.downloaded,
     sourceMissing: !['local', '0'].includes(item.stored.manga.sourceId) && !getSource(item.stored.manga.sourceId), selected: selecting ? selected.has(item.entry.key) : undefined }));
   function toggle(key: string): void { setSelecting(true); setSelected(old => { const next = new Set(old); if (next.has(key)) next.delete(key); else next.add(key); return next; }); }
@@ -97,6 +100,7 @@ export default function LibraryPage() {
     <div className="category-tabs" aria-label="Library categories">{['All', ...new Set((data?.categories ?? []).map(c => c.name))].map(name =>
       <button key={name} className={`category-tab ${category === name ? 'active' : ''}`} aria-pressed={category === name} onClick={() => setCategory(name)}>{name}<span>{name === 'All' ? all.length : all.filter(i => libraryCategories(i.entry).includes(name)).length}</span></button>)}</div>
     {settings.downloadedOnly && <div className="inline-note"><Icon name="download" size={16} /> Downloaded titles only<button className="text-btn" onClick={() => saveSettings({ downloadedOnly: false })}>Show all</button></div>}
+    {!selecting && <div className="library-sort-bar"><span>{visible.length} titles</span><button className="text-btn" aria-label="Sort library" onClick={() => setSheet('sort')}><Icon name="sort" size={18} />{LIBRARY_SORT_OPTIONS.find(option => option.value === settings.librarySort)?.label}<span aria-hidden="true">{settings.librarySortDirection === 'descending' ? '↓' : '↑'}</span></button></div>}
     {!selecting && !query && category === 'All' && data?.resume && (!settings.downloadedOnly || data.downloaded.has(data.resume.key)) && <button className="continue-card" onClick={() => nav.openReader(data.resume!.mangaKey, data.resume!.key.slice(data.resume!.mangaKey.length + 2))}>
       <Cover url={data.resume.coverUrl} title={data.resume.mangaTitle} /><span><small>CONTINUE READING</small><strong>{data.resume.mangaTitle}</strong><span>{data.resume.chapterName} · Page {data.resume.page + 1}</span></span><span className="continue-play"><Icon name="play" size={20} filled /></span>
     </button>}
@@ -119,10 +123,10 @@ export default function LibraryPage() {
     {sheet === 'filters' && <Sheet title="Library options" onClose={() => setSheet(null)}>
       <div className="form-row"><span>Downloaded only</span><input type="checkbox" aria-label="Downloaded only" checked={settings.downloadedOnly} onChange={e => saveSettings({ downloadedOnly: e.target.checked })} /></div>
       <label className="form-row">Reading status<select value={filter} onChange={e => setFilter(e.target.value as Filter)}><option value="all">All titles</option><option value="unread">Has unread chapters</option><option value="started">Started reading</option><option value="completed">All chapters read</option><option value="bookmarked">Has bookmarks</option><option value="missing">Needs a source</option></select></label>
-      <label className="form-row">Sort by<select value={settings.librarySort} onChange={e => saveSettings({ librarySort: e.target.value as typeof settings.librarySort })}><option value="title">Title</option><option value="added">Date added</option><option value="read">Last read</option><option value="unread">Unread count</option></select></label>
-      <label className="form-row">Reverse order<input type="checkbox" checked={settings.sortDescending} onChange={e => saveSettings({ sortDescending: e.target.checked })} /></label>
+      <LibrarySortControls />
       <label className="form-row">Display<select value={settings.libraryView} onChange={e => saveSettings({ libraryView: e.target.value as 'grid' | 'list' })}><option value="grid">Cover grid</option><option value="list">List</option></select></label><button className="btn wide" onClick={() => setSheet(null)}>Done</button>
     </Sheet>}
+    {sheet === 'sort' && <Sheet title="Sort library" onClose={() => setSheet(null)}><LibrarySortControls /><button className="btn wide" onClick={() => setSheet(null)}>Done</button></Sheet>}
     {sheet === 'more' && <Sheet title="Library" onClose={() => setSheet(null)}>
       <button className="sheet-option" onClick={() => { setSheet(null); setSelecting(true); }}><Icon name="check" />Select titles</button>
       <button className="sheet-option" onClick={nav.openCategories}><Icon name="folder" />Manage categories</button>

@@ -28,11 +28,11 @@ For the PWA, Suwayomi, and optional trusted HTTPS setup together, follow [docs/S
 
 1. Export a `.tachibk` backup from Mihon and move it to your iPhone’s Files app.
 2. Open **More → Backup & restore → Choose backup**. Review the counts and sources, then restore. Restoration merges with your library and preserves newer local reading progress.
-3. For Android sources, start Suwayomi and install the matching extensions in its WebUI. Open **Connections** in the PWA and connect to that server.
+3. For Android sources, start Suwayomi and connect in **Connections**. Open **Browse → Extensions**, add the stores retained from your Mihon backup, and install the matching extensions. You can also use Suwayomi's WebUI.
 4. Use **Copy to server** beside the retained Mihon backup. This gives Suwayomi the original source IDs and manga/chapter URLs. If your hosting platform limits uploads, restore the original file in Suwayomi’s WebUI instead.
 5. Open a title and download chapters. Completed chapters can be read with both the network and Suwayomi unavailable.
 
-The repository’s `app.mihon_2026-11-07_15-00.tachibk` is **an empty placeholder**. The importer was implemented against Mihon’s open source schema and independent synthetic fixtures. A real, nonempty backup is required to migrate your personal library.
+The repository's `app.mihon_2026-11-07_15-00.tachibk` is an empty placeholder. The separate original backup supplied from Downloads was parsed successfully: 310 manga records, 146 library titles, 60,192 chapters and 19,965 history entries. Personal backup files and generated inspection artifacts are excluded from Git.
 
 ### What a Mihon restore retains
 
@@ -43,7 +43,7 @@ The repository’s `app.mihon_2026-11-07_15-00.tachibk` is **an empty placeholde
 | Chapters | Metadata, read/unread state, last page, bookmarks, scanlators, source order, dates, and memos are retained. |
 | History | Reading dates and duration are retained. The PWA records new progress and history together. |
 | Tracking | Original tracking IDs, scores, status, and progress are retained and viewable. Tracker login and live tracker synchronization are not implemented. |
-| Preferences | Matching reader preferences can be applied. Android preferences, source preferences, and extension repository metadata are retained even when there is no web equivalent. |
+| Preferences | Matching reader and library sort preferences can be applied. Android preferences, source preferences, and extension repository metadata are retained even when there is no web equivalent. |
 | Original file | The original compressed bytes are retained by SHA-256 and can be downloaded unchanged. This preserves future and Android-specific fields. |
 
 A `.tachibk` does **not** contain downloaded chapter images or the Android extension APKs. Install matching extensions in Suwayomi, then download pages or import existing chapter files.
@@ -54,11 +54,11 @@ Put each chapter’s numbered image files in its own ZIP/CBZ archive. Under **Ba
 
 ## Reading and library features
 
-- Library search, categories, multiple memberships, grid/list views, sorting, unread and download badges, and batch actions.
+- Library search, categories, multiple memberships, grid/list views, a visible sort control, unread and download badges, and batch actions. Last read defaults to newest first; restoring matching preferences applies Mihon's saved sort direction. Alphabetical, date added, unread count, total chapters, last update, latest chapter, chapter fetch date and stable random ordering are also available.
 - Webtoon reading with optional continuous chapters, LTR/RTL paged reading, fit controls, zoom, swipe/keyboard navigation, bookmarks, page seeking, and resume offsets.
 - A persistent download queue with progress, pause, resume, cancel, retry, interrupted-download recovery, and a foreground screen wake lock where supported.
 - Download management, CBZ export, storage usage, and persistent-storage requests.
-- Source-specific browsing and pagination, MangaDex language/data-saver settings, Suwayomi connections, and installable web source adapters.
+- Browse Sources/Extensions/Titles sections, source search and language filtering, source-specific pagination, MangaDex language/data-saver settings, and installable web adapters. The Mihon extension catalog supports store management, language/status filtering, install, update and uninstall through Suwayomi. Stores from a restored backup can be added directly from the extension screen.
 - Library updates that isolate individual source failures, saved update results, searchable reading history, and source migration that carries reading state.
 - Dark/light themes, mobile safe areas, install icons, an offline app shell, and an explicit app-update prompt.
 
@@ -78,7 +78,9 @@ The reader materializes cached image URLs near the viewport and releases them as
 
 Use **Export PWA library (.json)** for metadata, reading state, settings, categories, web extension code, and original Mihon archives. Export downloaded chapter images separately as **CBZ** from Downloads. Restore the JSON, then attach the CBZ files to their existing titles to move both data and pages to another device.
 
-JSON v1 backups remain readable. JSON v2 preserves the additional migration metadata. Included web extension code is only activated when you select that restore option. There is no account synchronization or new `.tachibk` generation; the original `.tachibk` can be exported unchanged.
+Use **Export for Mihon Android (.tachibk)** to create a new compressed Mihon backup containing current library membership, progress, bookmarks, history, categories, notes, tracking records, compatible source IDs and retained Android preferences/stores. Install matching extensions on Android, then restore the file in Mihon. Chapters downloaded on iOS must be exported separately as CBZ. Browser-only source IDs cannot be represented in Mihon; the export explains which titles need source migration instead of silently omitting them.
+
+JSON v1 backups remain readable. JSON v2 preserves the additional migration metadata. Included web extension code is only activated when you select that restore option. There is no account synchronization. The original `.tachibk` can also be exported unchanged; generated Android backups contain current supported data rather than an unchanged copy of the old file.
 
 ## Hosting and source networking
 
@@ -99,7 +101,7 @@ npm run test:e2e
 
 Unit tests cover protobuf preservation, transactional restoration, storage, source identity, networking cancellation, queue recovery, chapter file imports, downloads, and updates. Mobile Chromium/WebKit tests cover migration, categories, chapter imports, downloads, offline reloads, reader resume, final-page behavior, and navigation. [The optional live server check](docs/SUWAYOMI.md#live-server-contract-check) verifies backup restoration, original-URL resolution, page fetching, and offline caching against Suwayomi.
 
-Physical iPhone installation, iOS storage eviction, and the unavailable personal backup have not been verified. Full Android feature parity is not claimed; the core library, migration, reading, and offline download workflows are implemented.
+Physical iPhone installation and iOS storage eviction have not been verified. Full Android feature parity is not claimed; the core library, migration, reading, source management and offline download workflows are implemented. Android packages execute in Suwayomi rather than on the iPhone.
 
 ## References
 

@@ -9,6 +9,7 @@ import Icon from '../components/Icon';
 import { toast } from '../components/Feedback';
 import { initPlugins } from '../lib/plugins';
 import { initSuwayomi } from '../lib/suwayomi';
+import { createMihonBackup } from '../backup/export';
 
 export default function BackupPage() {
   const nav = useNav();
@@ -53,6 +54,15 @@ export default function BackupPage() {
     catch (error) { setError(error instanceof Error ? error.message : 'Export failed'); }
     finally { setBusy(false); }
   }
+  async function exportMihon(): Promise<void> {
+    setBusy(true); setError(''); setMessage('Creating Mihon backup…');
+    try {
+      const backup = await createMihonBackup();
+      saveFile(backup.file, `mihon-ios-${new Date().toISOString().slice(0, 10)}.tachibk`);
+      setMessage(`Exported ${backup.libraryCount} library titles for Mihon on Android. Chapter images are exported separately as CBZ.`);
+    } catch (error) { setError(error instanceof Error ? error.message : 'Mihon export failed'); setMessage(''); }
+    finally { setBusy(false); }
+  }
   async function chooseCbz(event: ChangeEvent<HTMLInputElement>): Promise<void> {
     const files = [...event.target.files ?? []]; event.target.value = '';
     if (!files.length || busy) return;
@@ -75,13 +85,13 @@ export default function BackupPage() {
     {preview && <section className="settings-card backup-review"><div className="card-heading"><Icon name="check" /><h3>Review Mihon backup</h3></div><p className="filename">{preview.name} · {formatBytes(preview.file.size)}</p>
       <div className="backup-stats">{[[preview.libraryCount, 'Library titles'], [preview.chapterCount, 'Chapters'], [preview.readCount, 'Read chapters'], [preview.bookmarkCount, 'Bookmarks'], [preview.backup.categories.length, 'Categories'], [preview.historyCount, 'History entries']].map(([value, label]) => <div key={label}><strong>{value}</strong><span>{label}</span></div>)}</div>
       <h4>Sources in this backup</h4>{preview.sources.map(source => <div className="source-review-row" key={source.id}><div><strong>{source.name}</strong><small>{source.mangaCount} titles</small></div><span className={`chip ${source.available ? 'success-chip' : ''}`}>{source.available ? 'Ready' : 'Connect after restore'}</span></div>)}
-      <label className="form-row">Restore matching reader preferences<input type="checkbox" checked={preferences} onChange={e => setPreferences(e.target.checked)} /></label>
+      <label className="form-row">Restore reader and library sorting preferences<input type="checkbox" checked={preferences} onChange={e => setPreferences(e.target.checked)} /></label>
       <p className="muted">All categories, bookmarks, progress, history, notes, tracking records, and Android preferences are retained. A copy of the original file stays on this device. Chapter images need to be downloaded or imported separately.</p>
       <button className="btn wide" disabled={busy} onClick={() => void restore()}>{busy ? 'Restoring…' : `Restore ${preview.libraryCount} library titles`}</button><button className="text-btn" disabled={busy} onClick={() => setPreview(null)}>Cancel</button>
     </section>}
     {jsonPreview && <section className="settings-card backup-review"><h3>Review PWA backup</h3><p className="filename">{jsonPreview.name}</p><p>{jsonPreview.data.library.length} library titles · {jsonPreview.data.chapterMeta.length} chapters · {jsonPreview.data.history.length} history entries</p>{!!jsonPreview.data.plugins?.length && <label className="form-row">Restore included web extensions<input type="checkbox" checked={restorePlugins} onChange={e => setRestorePlugins(e.target.checked)} /></label>}<p className="muted">Reading state, categories, settings, and original Mihon archives are restored. Chapter images are separate CBZ files.</p><button className="btn wide" disabled={busy} onClick={() => void restore()}>Restore library</button><button className="text-btn" disabled={busy} onClick={() => setJsonPreview(null)}>Cancel</button></section>}
     {result && <section className="settings-card restore-result"><Icon name="check" size={34} /><h3>{result.libraryCount} titles restored</h3><p>{result.chapterCount} chapters · {result.bookmarkCount} bookmarks · {result.historyCount} history entries</p>{result.unavailableCount > 0 && <p>{result.unavailableCount} titles need a source connection. Suwayomi can run their Android extensions.</p>}<div className="button-row"><button className="btn" onClick={() => nav.setTab('library')}>Open library</button>{result.unavailableCount > 0 && <button className="btn-ghost" onClick={nav.openConnections}>Connect sources</button>}</div></section>}
-    <section className="settings-card"><div className="card-heading"><Icon name="download" /><h3>Save your library</h3></div><p className="muted">Export library metadata, reading state, categories, settings, and retained Mihon files. Export chapter images as CBZ from Downloads.</p><button className="btn-ghost outlined wide" disabled={busy} onClick={() => void exportLibrary()}>Export PWA library (.json)</button></section>
+    <section className="settings-card"><div className="card-heading"><Icon name="download" /><h3>Save your library</h3></div><p className="muted">Export your current library, reading progress and categories for this app or Mihon on Android. Export chapter images as CBZ from Downloads.</p><button className="btn-ghost outlined wide" disabled={busy} onClick={() => void exportLibrary()}>Export PWA library (.json)</button><button className="btn-ghost outlined wide" disabled={busy} onClick={() => void exportMihon()}>Export for Mihon Android (.tachibk)</button><p className="muted">The Mihon backup includes current progress and compatible source IDs. Install matching extensions on Android before restoring. Browser-only sources require JSON backup or migration to a compatible source.</p></section>
     <section className="settings-card"><div className="card-heading"><Icon name="folder" /><h3>Import offline chapters</h3></div><p className="muted">Copy your Android downloads as CBZ/ZIP files. Put each chapter’s numbered images in its own ZIP. Select an existing title to retain its reading progress.</p>
       <label className="field-label">Destination<select aria-label="Chapter import destination" value={destination} onChange={e => setDestination(e.target.value)}><option value="">Create a local title</option>{data?.mangas.map(m => <option key={m.key} value={m.key}>{m.manga.title}</option>)}</select></label>
       {!destination && <label className="field-label">Series title<input type="text" placeholder="Use one title to group chapter files" value={cbzTitle} onChange={e => setCbzTitle(e.target.value)} /></label>}

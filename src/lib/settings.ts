@@ -1,6 +1,7 @@
 export type ReaderMode = 'vertical' | 'paged' | 'rtl';
 export type ThemeName = 'dark' | 'light';
 export type LibraryView = 'grid' | 'list';
+export type LibrarySort = 'title' | 'added' | 'read' | 'unread' | 'updated' | 'chapters' | 'latest' | 'fetched' | 'random';
 
 export interface Settings {
   readerMode: ReaderMode;
@@ -9,8 +10,9 @@ export interface Settings {
   libraryView: LibraryView;
   extensionIndexes: string[];
   downloadedOnly: boolean;
-  librarySort: 'title' | 'added' | 'read' | 'unread';
-  sortDescending: boolean;
+  librarySort: LibrarySort;
+  librarySortDirection: 'ascending' | 'descending';
+  libraryRandomSeed: number;
   dataSaver: boolean;
   continuousReading: boolean;
   readerFit: 'width' | 'screen';
@@ -25,8 +27,9 @@ export const DEFAULT_SETTINGS: Settings = {
   libraryView: 'grid',
   extensionIndexes: [],
   downloadedOnly: false,
-  librarySort: 'title',
-  sortDescending: false,
+  librarySort: 'read',
+  librarySortDirection: 'descending',
+  libraryRandomSeed: 1,
   dataSaver: true,
   continuousReading: true,
   readerFit: 'screen',
@@ -69,9 +72,16 @@ function normalizeSettings(value: unknown): Settings {
         )
       : DEFAULT_SETTINGS.extensionIndexes,
     downloadedOnly: stored.downloadedOnly === true,
-    librarySort: ['title', 'added', 'read', 'unread'].includes(String(stored.librarySort))
-      ? stored.librarySort as Settings['librarySort'] : 'title',
-    sortDescending: stored.sortDescending === true,
+    librarySort: ['title', 'added', 'read', 'unread', 'updated', 'chapters', 'latest', 'fetched', 'random'].includes(String(stored.librarySort))
+      ? stored.librarySort as LibrarySort : DEFAULT_SETTINGS.librarySort,
+    librarySortDirection: stored.librarySortDirection === 'ascending' || stored.librarySortDirection === 'descending'
+      ? stored.librarySortDirection
+      // Earlier versions called this checkbox "Reverse order": numeric
+      // modes started largest first, while titles started alphabetically.
+      : typeof stored.sortDescending === 'boolean'
+        ? (stored.librarySort === 'title' ? stored.sortDescending : !stored.sortDescending) ? 'descending' : 'ascending'
+        : DEFAULT_SETTINGS.librarySortDirection,
+    libraryRandomSeed: Number.isSafeInteger(stored.libraryRandomSeed) ? Number(stored.libraryRandomSeed) : DEFAULT_SETTINGS.libraryRandomSeed,
     dataSaver: stored.dataSaver !== false,
     continuousReading: stored.continuousReading !== false,
     readerFit: stored.readerFit === 'width' ? 'width' : 'screen',
