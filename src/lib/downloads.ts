@@ -1,5 +1,6 @@
 import { getSource } from '../sources';
-import { dispatchDataEvent, downloadRemovalKey, getChapterMetas, getDB, getDownload, getDownloadsForManga, isMangaDownloadRemoved, type DownloadRecord } from './db';
+import { dispatchDataEvent, downloadRemovalKey, getChapterMetas, getChapterState, getDB, getDownload, getDownloadsForManga, isMangaDownloadRemoved, type DownloadRecord } from './db';
+import { loadSettings } from './settings';
 import { fetchImage } from './fetchJson';
 import { blobPart } from './bytes';
 import { imageDimensions } from './images';
@@ -204,6 +205,17 @@ export async function deleteChapterDownload(mangaKey: string, key: string): Prom
   else await tx.objectStore('chapterState').put({ key, mangaKey, read: false, lastPage: 0, downloaded: false });
   await tx.done;
   dispatchDataEvent('mihon:downloads-changed');
+}
+/** Mihon-style cleanup: once a chapter has been read to the end, its
+ * downloaded pages are deleted to free storage. Gated by the
+ * deleteReadDownloads setting (on by default); reading progress and
+ * history are kept, and the chapter can be downloaded again anytime. */
+export async function maybeAutoDeleteReadChapter(mangaKey: string, key: string): Promise<void> {
+  if (!loadSettings().deleteReadDownloads) return;
+  const state = await getChapterState(key);
+  if (!state?.read || !state.downloaded) return;
+  if (!(await getDownload(key))) return;
+  await deleteChapterDownload(mangaKey, key);
 }
 export async function deleteMangaDownloads(mangaKey: string): Promise<void> {
   const tasks = [...active].filter(([key]) => key.startsWith(mangaKey + '::')).map(([, task]) => task);

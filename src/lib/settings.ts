@@ -10,6 +10,7 @@ export interface Settings {
   libraryView: LibraryView;
   extensionIndexes: string[];
   downloadedOnly: boolean;
+  deleteReadDownloads: boolean;
   librarySort: LibrarySort;
   librarySortDirection: 'ascending' | 'descending';
   libraryRandomSeed: number;
@@ -28,6 +29,7 @@ export const DEFAULT_SETTINGS: Settings = {
   libraryView: 'grid',
   extensionIndexes: [],
   downloadedOnly: false,
+  deleteReadDownloads: true,
   librarySort: 'read',
   librarySortDirection: 'descending',
   libraryRandomSeed: 1,
@@ -80,6 +82,7 @@ function normalizeSettings(value: unknown): Settings {
         )
       : DEFAULT_SETTINGS.extensionIndexes,
     downloadedOnly: stored.downloadedOnly === true,
+    deleteReadDownloads: stored.deleteReadDownloads !== false,
     librarySort: ['title', 'added', 'read', 'unread', 'updated', 'chapters', 'latest', 'fetched', 'random'].includes(String(stored.librarySort))
       ? stored.librarySort as LibrarySort : DEFAULT_SETTINGS.librarySort,
     librarySortDirection: stored.librarySortDirection === 'ascending' || stored.librarySortDirection === 'descending'

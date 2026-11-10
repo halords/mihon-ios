@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { getChapterState, patchChapterState, patchManga, saveReadingProgress } from '../lib/db';
-import { getCachedPageList, PAGES_CACHE, revokeBlobUrls } from '../lib/downloads';
+import { getCachedPageList, maybeAutoDeleteReadChapter, PAGES_CACHE, revokeBlobUrls } from '../lib/downloads';
 import { loadMangaData } from '../lib/mangaData';
 import { useNav } from '../lib/nav';
 import { useOnline, useSettings } from '../lib/hooks';
@@ -120,7 +120,10 @@ export default function ReaderPage({ mangaKey, chapterId }: { mangaKey: string; 
     durationStart.current = now;
     const history = { key: current.segment.key, mangaKey, mangaTitle: data.manga.title, coverUrl: data.manga.coverUrl,
       chapterName: current.segment.chapter.name, page: current.page, updatedAt: now, readDuration: duration };
-    writeChain.current = writeChain.current.then(() => saveReadingProgress(history, current.read, current.offset)).catch(() => toast('Unable to save reading progress. Check device storage.'));
+    writeChain.current = writeChain.current
+      .then(() => saveReadingProgress(history, current.read, current.offset))
+      .catch(() => toast('Unable to save reading progress. Check device storage.'))
+      .then(() => { if (current.read) return maybeAutoDeleteReadChapter(mangaKey, current.segment.key).catch(() => {}); });
   }, [mangaKey]);
   const restorePosition = useCallback(() => {
     if (!restoring.current || !root.current || !strip.current) return;
