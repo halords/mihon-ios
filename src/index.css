@@ -213,6 +213,8 @@ textarea { width:100%; min-height:120px; resize:vertical; }
 .chapter-selection-marker.is-selected { background:var(--accent); border-color:var(--accent); color:var(--accent-text); }
 .details-screen.chapter-selecting { padding-bottom:calc(env(safe-area-inset-bottom,0px) + 112px); }
 .chapter-selection-actions { position:fixed; z-index:14; bottom:calc(env(safe-area-inset-bottom,0px) + 14px); left:50%; display:flex; align-items:center; gap:4px; width:min(calc(100% - 32px),470px); transform:translateX(-50%); padding:7px; border:1px solid color-mix(in srgb,var(--accent) 28%,var(--border)); border-radius:25px; background:color-mix(in srgb,var(--surface) 94%,transparent); backdrop-filter:blur(20px); -webkit-backdrop-filter:blur(20px); box-shadow:0 8px 32px #0005; }
+.chapter-play-fab { position:fixed; z-index:12; right:max(16px,env(safe-area-inset-right,0px)); bottom:calc(env(safe-area-inset-bottom,0px) + 16px); display:flex; align-items:center; justify-content:center; width:56px; height:56px; border:0; border-radius:50%; background:var(--accent); color:#fff; box-shadow:0 8px 24px #0006; cursor:pointer; }
+.chapter-play-fab:active { transform:scale(.94); }
 .chapter-selection-count { display:grid; place-items:center; min-width:34px; height:34px; margin-inline:4px; padding-inline:6px; border-radius:12px; background:var(--accent-surface); color:var(--accent); font-size:13px; font-weight:700; font-variant-numeric:tabular-nums; }
 .chapter-selection-actions>button:not(.icon-btn) { flex:1; display:flex; align-items:center; justify-content:center; gap:7px; min-height:46px; border:0; border-radius:17px; padding:8px; background:var(--surface2); color:var(--text); font-size:13px; font-weight:650; }
 .chapter-mark-read svg { color:var(--ok); }

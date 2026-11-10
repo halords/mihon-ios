@@ -177,3 +177,6 @@ Acceptance timing on the revised pipeline: 131,039 changes uploaded in ~14–15 
 - `summary()` and `cycle()` no longer materialize the whole store via getAll(); a cursor stream (`scanSyncRecords`) counts/collects pending in primary-key order (sequence unchanged). Caveat: still O(n) streaming — a by-pending index would need a db.ts schema bump.
 - New tests: ack against a 5,000-record unrelated backlog with getAll rigged to throw (syncRevision), migration replace-vs-keep pair (tests/migration.test.ts — replace journals a library tombstone; keepOriginal=true keeps both).
 Suite: 111/112 (only pre-existing browserBackend VPS failure). Build clean.
+
+## Continue-reading FAB on title page (2026-11-10, user request)
+Floating circular play button at the lower right of the chapter list (MangaDetailsPage): opens the reader at the same continue target as the header read button (latest in-progress chapter, else first unread, else first chapter). Accent circle, safe-area aware; hidden while chapter selection mode is active or a sheet is open, and when nothing is readable (no source and no downloads). There was no scroll-to-top button in the app — the FAB simply occupies that spot, per the user's framing.

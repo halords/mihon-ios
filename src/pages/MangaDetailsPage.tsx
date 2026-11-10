@@ -149,6 +149,7 @@ export default function MangaDetailsPage({ mangaKey }: { mangaKey: string }) {
           }} onOptions={() => { setActiveChapter(chapter); setSheet('chapter'); }} />;
       })}
     </section>
+    {!selecting && !sheet && target && canRead && <button className="chapter-play-fab" aria-label={`${readLabel}: ${target.name}`} onClick={() => nav.openReader(mangaKey, target.id)}><Icon name="play" size={24} filled /></button>}
     {selecting && <div className="chapter-selection-actions" role="toolbar" aria-label="Selected chapter actions" aria-busy={busy}>
       <span className="chapter-selection-count" aria-live="polite" aria-atomic="true"><span className="sr-only">Selected chapters: </span>{selected.size}</span>
       <button className="chapter-mark-read" disabled={!selected.size || busy} aria-label="Mark selected chapters as read" onClick={() => markSelection(true)}><Icon name="check" size={19} />Read</button>
