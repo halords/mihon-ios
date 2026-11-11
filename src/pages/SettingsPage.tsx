@@ -47,6 +47,7 @@ export default function SettingsPage() {
       <div className="form-row"><span>Persistent storage</span>{storage.persistent ? <span className="chip success-chip">Granted</span> : <button className="text-btn" disabled={!navigator.storage?.persist} onClick={() => void navigator.storage.persist().then(granted => { toast(granted ? 'Persistent storage granted' : 'This browser did not grant persistent storage'); void refreshStorage(); }).catch(() => toast('Persistent storage is unavailable'))}>Request</button>}</div>
       <button className="sheet-option" onClick={nav.openDownloads}><Icon name="download" />Manage downloads<Icon name="chevron" size={18} /></button>
       <label className="form-row">Delete chapters after reading<input type="checkbox" checked={settings.deleteReadDownloads} onChange={e => saveSettings({ deleteReadDownloads: e.target.checked })} /></label>
+      <label className="form-row">Calm downloads (cooler, slower)<input type="checkbox" checked={settings.calmDownloads} onChange={e => saveSettings({ calmDownloads: e.target.checked })} /></label>
       <p className="muted">Like Mihon: once you finish a downloaded chapter, its pages are deleted to free storage. Your place and history are kept, and you can download it again anytime.</p>
       <button className="sheet-option danger" disabled={busy} onClick={() => {
         if (!window.confirm('Delete all downloaded chapter images and queued downloads? Library, bookmarks, and reading progress are kept.')) return;

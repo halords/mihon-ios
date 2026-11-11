@@ -73,6 +73,12 @@ export async function commitDownload(record: DownloadRecord): Promise<void> {
   dispatchDataEvent('mihon:downloads-changed');
 }
 
+// Page-fetch parallelism for chapter downloads. Full speed runs 5 pages
+// at once; the Calm downloads setting drops it to 3 — fewer simultaneous
+// fetch/decode/store round trips means a cooler phone at some speed cost
+// (heat-reduction pass, 2026-11-11).
+export function downloadConcurrency(calm: boolean): number { return calm ? 3 : 5; }
+
 export async function downloadChapter(
   mangaKey: string, key: string, sourceId: string, mangaId: string, chapterId: string,
   onProgress?: (done: number, total: number) => void | Promise<void>, signal?: AbortSignal,
@@ -174,7 +180,7 @@ export async function downloadChapter(
         catch (error) { failure ??= error; }
       }
     };
-    await Promise.all(Array.from({ length: Math.min(5, pages.length) }, () => worker()));
+    await Promise.all(Array.from({ length: Math.min(downloadConcurrency(loadSettings().calmDownloads), pages.length) }, () => worker()));
     if (failure) throw failure;
     checkAbort(controller.signal);
     await commitDownload({ key, mangaKey, pageCount: pages.length, byteSize: bytes, downloadedAt: Date.now(), pages: dimensions });

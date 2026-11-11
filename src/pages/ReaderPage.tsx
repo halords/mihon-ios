@@ -35,6 +35,22 @@ function PageImage({ page, index, eager, paged, fit, onLoad }: { page: MangaPage
   const [src, setSrc] = useState(page.cachedKey || needsDecode ? '' : page.imageUrl);
   const [size, setSize] = useState({ width: page.width ?? 800, height: page.height ?? 1200 });
   const element = useRef<HTMLDivElement>(null);
+  // Heat reduction (2026-11-11): plain remote pages join the blob-managed
+  // pages in near-viewport recycling. Blob pages already unload when far
+  // (object URL revoked in the effect above); remote pages used to keep
+  // their <img> — and its decoded bitmap — alive for the whole session,
+  // which grows without bound as webtoon mode chains chapters. Now the
+  // <img> unmounts once the page is far from the viewport and the
+  // container's aspect ratio holds its exact place in the strip.
+  const blobManaged = !!(page.cachedKey || needsDecode);
+  const [near, setNear] = useState(!!eager);
+  useEffect(() => {
+    if (paged || blobManaged) return;
+    const el = element.current; if (!el) return;
+    const observer = new IntersectionObserver(entries => { setNear(entries.some(e => e.isIntersecting)); }, { root: el.closest('.reader-screen'), rootMargin: '1000px 0px' });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [paged, blobManaged]);
   useEffect(() => {
     if (!page.cachedKey && !needsDecode) return;
     let alive = true;
@@ -63,9 +79,10 @@ function PageImage({ page, index, eager, paged, fit, onLoad }: { page: MangaPage
     if (paged) void activate(true);
     return () => { alive = false; request++; controller?.abort(); observer.disconnect(); if (objectUrl) URL.revokeObjectURL(objectUrl); };
   }, [page.cachedKey, page.imageUrl, page.width, needsDecode, paged, eager, attempt]);
-  return <div ref={element} className={`reader-page ${paged ? `paged-page fit-${fit}` : ''}`} data-page={index} style={page.cachedKey && !paged ? { aspectRatio: `${size.width} / ${size.height}` } : undefined}>
+  const showImage = !!src && (blobManaged || near || !!eager);
+  return <div ref={element} className={`reader-page ${paged ? `paged-page fit-${fit}` : ''}`} data-page={index} style={!paged ? { aspectRatio: `${size.width} / ${size.height}` } : undefined}>
     {failed ? <div className="page-error"><Icon name="cloud" size={30} /><p>Page {index + 1} could not load</p><button className="btn" onClick={event => { event.stopPropagation(); setFailed(false); setAttempt(a => a + 1); }}>Retry page</button></div> :
-      src ? <img key={attempt} src={src} alt={`Page ${index + 1}`} width={size.width} height={size.height} loading={eager || paged ? 'eager' : 'lazy'} decoding="async" referrerPolicy="no-referrer" draggable={false} onLoad={event => { const img = event.currentTarget; setSize({ width: img.naturalWidth, height: img.naturalHeight }); requestAnimationFrame(onLoad); }} onError={() => setFailed(true)} /> : <div className="page-placeholder" aria-label={`Loading page ${index + 1}`} />}
+      showImage ? <img key={attempt} src={src} alt={`Page ${index + 1}`} width={size.width} height={size.height} loading={eager || paged ? 'eager' : 'lazy'} decoding="async" referrerPolicy="no-referrer" draggable={false} onLoad={event => { const img = event.currentTarget; setSize({ width: img.naturalWidth, height: img.naturalHeight }); requestAnimationFrame(onLoad); }} onError={() => setFailed(true)} /> : <div className="page-placeholder" aria-label={`Loading page ${index + 1}`} />}
   </div>;
 }
 

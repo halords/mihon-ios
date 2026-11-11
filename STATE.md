@@ -2,6 +2,12 @@
 
 Updated 2026-11-11. Turso accounts and automatic library/history sync are implemented and deployed at `https://mihon-ios.vercel.app`. Chapter range selection, floating reading-state actions and compact migration branding remain included. Web adapters, sorting, Android extension management and current-state `.tachibk` export remain implemented. The user previously authorized committing and pushing verified changes to GitHub.
 
+## Heat-reduction pass (2026-11-11)
+
+User-approved after the process audit (only two timers in the app: reader 15s heartbeat, BrowserSourcesPanel 3s while open; wake lock downloads-only).
+- Webtoon page recycling (src/pages/ReaderPage.tsx, PageImage): blob-managed pages (downloaded/tiles) already unloaded when far; plain remote pages kept their <img> and decoded bitmap alive for the whole session, growing without bound as vertical mode chains chapters. They now get the same near-viewport treatment: an IntersectionObserver (rootMargin 1000px) unmounts the <img> when far, and the container carries an aspect-ratio for ALL non-paged pages so the strip layout/scroll position is unchanged. Paged mode untouched.
+- Calm downloads (src/lib/downloads.ts, src/lib/settings.ts, SettingsPage): new setting calmDownloads (default off), toggle at Settings -> Device storage -> "Calm downloads (cooler, slower)". Page-fetch pool 5 -> 3 via exported downloadConcurrency(calm). Tests tests/heatPass.test.ts (concurrency values + setting default/persistence).
+
 ## Import-then-login adoption fix (2026-11-11)
 
 User report: importing a library as a guest and THEN logging in appeared to wipe the import — only login-first-then-import worked.
