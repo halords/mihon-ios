@@ -9,15 +9,17 @@ import type { HistoryRecord } from './db';
 // - chapter-progress: the reader, after each progress save (read or not).
 //   Carries the saved history record so the snapshot's last-read time and
 //   continue-reading card stay current, plus whether the chapter became
-//   read and whether its download was auto-deleted.
-// - title-opened: navigation, when the user opens a manga or its reader.
+//   read and whether its download was auto-deleted. The reader saves
+//   progress the moment a chapter loads (flush on load), so this is also
+//   the move-to-top signal: a title jumps to the top only when one of its
+//   chapters is opened AND loaded. Merely opening the details page emits
+//   nothing (user correction, 2026-11-12).
 // - library-added / library-removed: the details page, after the library
 //   entry is written.
 // Sync pulls deliberately NEVER emit these: background sync must not
 // reshuffle the visible Library (session-snapshot rule, 2026-11-10).
 export type LibraryLiveUpdate =
   | { type: 'chapter-progress'; mangaKey: string; chapterKey: string; history: HistoryRecord; read: boolean; downloadedDeleted: boolean }
-  | { type: 'title-opened'; mangaKey: string; openedAt: number }
   | { type: 'library-added'; mangaKey: string }
   | { type: 'library-removed'; mangaKey: string };
 

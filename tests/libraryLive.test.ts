@@ -89,7 +89,7 @@ it('unfinished progress bumps last-read without changing the counts', async () =
   expect(next.resume?.key).toBe(b.chapterKeys[0]);
 });
 
-it('opening a title moves it first under the Last-read sort', async () => {
+it('opening and loading a chapter moves its title first under the Last-read sort', async () => {
   await seedAll();
   const snapshot = await loadLibrary();
   const settings = loadSettings();
@@ -97,14 +97,24 @@ it('opening a title moves it first under the Last-read sort', async () => {
   const before = [...snapshot.items].sort((x, y) => compareLibraryItems(x.sort, y.sort, settings));
   expect(before[0]!.entry.key).toBe(a.key);
 
-  const next = await applyLibraryLiveUpdate(snapshot, { type: 'title-opened', mangaKey: b.key, openedAt: T9 });
+  // The reader saves progress the moment a chapter loads (flush on load),
+  // so an unread chapter-progress event IS the "opened and loaded" signal.
+  // Merely opening the details page emits nothing (no emit in nav.tsx) —
+  // the title must not move until a chapter actually loads.
+  const next = await applyLibraryLiveUpdate(snapshot, { type: 'chapter-progress', mangaKey: b.key,
+    chapterKey: b.chapterKeys[0]!, history: historyFor(b, 0, 0, T9), read: false, downloadedDeleted: false });
   const after = [...next.items].sort((x, y) => compareLibraryItems(x.sort, y.sort, settings));
   expect(after[0]!.entry.key).toBe(b.key);
   expect(next.items.find(i => i.entry.key === b.key)!.lastRead).toBe(T9);
 
-  // Unknown titles and stale opens are no-ops (same reference, no re-render).
-  expect(await applyLibraryLiveUpdate(next, { type: 'title-opened', mangaKey: 'nope::/none', openedAt: T9 })).toBe(next);
-  expect(await applyLibraryLiveUpdate(next, { type: 'title-opened', mangaKey: b.key, openedAt: T1 })).toBe(next);
+  // Unknown titles are a no-op (same reference, no re-render).
+  expect(await applyLibraryLiveUpdate(next, { type: 'chapter-progress', mangaKey: 'nope::/none',
+    chapterKey: 'nope::/none::/ch', history: { ...historyFor(b, 0, 0, T9), mangaKey: 'nope::/none', key: 'nope::/none::/ch' },
+    read: false, downloadedDeleted: false })).toBe(next);
+  // Stale progress never drags the title back down.
+  const stale = await applyLibraryLiveUpdate(next, { type: 'chapter-progress', mangaKey: b.key,
+    chapterKey: b.chapterKeys[0]!, history: historyFor(b, 0, 0, T1), read: false, downloadedDeleted: false });
+  expect(stale.items.find(i => i.entry.key === b.key)!.lastRead).toBe(T9);
 });
 
 it('adding a title inserts it first without a full reload', async () => {

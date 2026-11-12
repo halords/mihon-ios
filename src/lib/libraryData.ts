@@ -125,15 +125,6 @@ export async function applyLibraryLiveUpdate(snapshot: LibraryData, update: Libr
       const items = snapshot.items.map(i => i === item ? nextItem : i);
       return { ...snapshot, items, history, resume: findResume(items, snapshot.state, snapshot.downloaded, history) };
     }
-    case 'title-opened': {
-      const item = snapshot.items.find(i => i.entry.key === update.mangaKey);
-      if (!item) return snapshot;
-      const lastRead = Math.max(item.lastRead, update.openedAt);
-      const sortRead = Math.max(item.sort.read, update.openedAt);
-      if (lastRead === item.lastRead && sortRead === item.sort.read) return snapshot;
-      const items = snapshot.items.map(i => i === item ? { ...item, lastRead, sort: { ...item.sort, read: sortRead } } : i);
-      return { ...snapshot, items };
-    }
     case 'library-added': {
       if (snapshot.items.some(i => i.entry.key === update.mangaKey)) return snapshot;
       const loaded = await loadLibraryItem(update.mangaKey);
@@ -157,9 +148,11 @@ export async function applyLibraryLiveUpdate(snapshot: LibraryData, update: Libr
 // ~140k chapter/history records behind it. It is NOT reloaded by
 // background sync: data changes from sync pulls do not touch this view.
 // It DOES patch live for the user's own actions (see libraryLive.ts):
-// reading progress, opening a title, adding/removing a title. The view
-// also reloads fully after an action taken on the Library page itself,
-// when the reader taps the refresh button, or on a full app reload.
+// reading progress — a chapter opened and loaded bumps its title to the
+// top — and adding/removing a title. Merely opening a title's details
+// page does not move it. The view also reloads fully after an action
+// taken on the Library page itself, when the reader taps the refresh
+// button, or on a full app reload.
 let librarySnapshot: LibraryData | null = null;
 const snapshotListeners = new Set<() => void>();
 
