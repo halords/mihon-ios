@@ -216,12 +216,13 @@ export async function deleteChapterDownload(mangaKey: string, key: string): Prom
  * downloaded pages are deleted to free storage. Gated by the
  * deleteReadDownloads setting (on by default); reading progress and
  * history are kept, and the chapter can be downloaded again anytime. */
-export async function maybeAutoDeleteReadChapter(mangaKey: string, key: string): Promise<void> {
-  if (!loadSettings().deleteReadDownloads) return;
+export async function maybeAutoDeleteReadChapter(mangaKey: string, key: string): Promise<boolean> {
+  if (!loadSettings().deleteReadDownloads) return false;
   const state = await getChapterState(key);
-  if (!state?.read || !state.downloaded) return;
-  if (!(await getDownload(key))) return;
+  if (!state?.read || !state.downloaded) return false;
+  if (!(await getDownload(key))) return false;
   await deleteChapterDownload(mangaKey, key);
+  return true;
 }
 export async function deleteMangaDownloads(mangaKey: string): Promise<void> {
   const tasks = [...active].filter(([key]) => key.startsWith(mangaKey + '::')).map(([, task]) => task);

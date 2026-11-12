@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { getChapterState, patchChapterState, patchManga, saveReadingProgress } from '../lib/db';
 import { getCachedPageList, maybeAutoDeleteReadChapter, PAGES_CACHE, revokeBlobUrls } from '../lib/downloads';
+import { emitLibraryLive } from '../lib/libraryLive';
 import { loadMangaData } from '../lib/mangaData';
 import { useNav } from '../lib/nav';
 import { useOnline, useSettings } from '../lib/hooks';
@@ -137,10 +138,17 @@ export default function ReaderPage({ mangaKey, chapterId }: { mangaKey: string; 
     durationStart.current = now;
     const history = { key: current.segment.key, mangaKey, mangaTitle: data.manga.title, coverUrl: data.manga.coverUrl,
       chapterName: current.segment.chapter.name, page: current.page, updatedAt: now, readDuration: duration };
-    writeChain.current = writeChain.current
-      .then(() => saveReadingProgress(history, current.read, current.offset))
-      .catch(() => toast('Unable to save reading progress. Check device storage.'))
-      .then(() => { if (current.read) return maybeAutoDeleteReadChapter(mangaKey, current.segment.key).catch(() => {}); });
+    writeChain.current = writeChain.current.then(async () => {
+      try { await saveReadingProgress(history, current.read, current.offset); }
+      catch { toast('Unable to save reading progress. Check device storage.'); return; }
+      // Live library update (local only, no sync): the Library snapshot
+      // patches this chapter's read/downloaded counts, last-read time and
+      // continue-reading card from the saved progress — no refresh tap.
+      // Only emitted after a successful save, so the snapshot never runs
+      // ahead of IndexedDB.
+      const deleted = current.read ? await maybeAutoDeleteReadChapter(mangaKey, current.segment.key).catch(() => false) : false;
+      emitLibraryLive({ type: 'chapter-progress', mangaKey, chapterKey: current.segment.key, history, read: current.read, downloadedDeleted: deleted });
+    });
   }, [mangaKey]);
   const restorePosition = useCallback(() => {
     if (!restoring.current || !root.current || !strip.current) return;

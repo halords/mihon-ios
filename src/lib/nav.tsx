@@ -1,4 +1,5 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
+import { emitLibraryLive } from './libraryLive';
 
 export type TabId = 'library' | 'updates' | 'history' | 'browse' | 'more';
 export type Route = { name: 'tabs' } | { name: 'details'; mangaKey: string } |
@@ -63,10 +64,16 @@ export function NavProvider({ children }: { children: ReactNode }) {
     ...state,
     setTab: tab => go({ name: 'tabs' }, tab),
     openManga: mangaKey => {
+      // Live library update (local only): the opened title jumps to the
+      // top of the Library under the Last-read sort, no refresh tap.
+      emitLibraryLive({ type: 'title-opened', mangaKey, openedAt: Date.now() });
       if (state.route.name === 'reader' && state.route.mangaKey === mangaKey && history.state?.from === 'details' && history.state?.depth > 0) history.back();
       else go({ name: 'details', mangaKey }, state.tab, state.route.name === 'reader');
     },
-    openReader: (mangaKey, chapterId) => go({ name: 'reader', mangaKey, chapterId }, state.tab, state.route.name === 'reader'),
+    openReader: (mangaKey, chapterId) => {
+      emitLibraryLive({ type: 'title-opened', mangaKey, openedAt: Date.now() });
+      go({ name: 'reader', mangaKey, chapterId }, state.tab, state.route.name === 'reader');
+    },
     openSettings: () => go({ name: 'settings' }), openExtensions: () => go({ name: 'extensions' }),
     openDownloads: () => go({ name: 'downloads' }), openBackup: () => go({ name: 'backup' }),
     openCategories: () => go({ name: 'categories' }), openConnections: () => go({ name: 'connections' }),

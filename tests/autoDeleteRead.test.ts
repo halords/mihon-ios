@@ -25,10 +25,10 @@ async function setupDownloaded() {
 
 it('deletes the download once the chapter is fully read (setting on by default)', async () => {
   await setupDownloaded();
-  await maybeAutoDeleteReadChapter(key, chapterKey);
+  expect(await maybeAutoDeleteReadChapter(key, chapterKey)).toBe(false);
   expect(await (await getDB()).get('downloads', chapterKey)).toBeDefined();
   await patchChapterState(chapterKey, key, { read: true });
-  await maybeAutoDeleteReadChapter(key, chapterKey);
+  expect(await maybeAutoDeleteReadChapter(key, chapterKey)).toBe(true);
   expect(await (await getDB()).get('downloads', chapterKey)).toBeUndefined();
   expect(await getChapterState(chapterKey)).toMatchObject({ read: true, downloaded: false });
 });
@@ -37,7 +37,7 @@ it('keeps the download when the setting is off', async () => {
   await setupDownloaded();
   saveSettings({ deleteReadDownloads: false });
   await patchChapterState(chapterKey, key, { read: true });
-  await maybeAutoDeleteReadChapter(key, chapterKey);
+  expect(await maybeAutoDeleteReadChapter(key, chapterKey)).toBe(false);
   expect(await (await getDB()).get('downloads', chapterKey)).toBeDefined();
   expect(await getChapterState(chapterKey)).toMatchObject({ read: true, downloaded: true });
 });

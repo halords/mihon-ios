@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { MangaGrid, MangaList, type MangaListItem } from '../components/MangaViews';
 import Icon from '../components/Icon';
 import Sheet from '../components/Sheet';
 import Cover from '../components/Cover';
 import { EmptyState, toast } from '../components/Feedback';
-import { getCategories, getDB, libraryCategories, patchChapterState, removeFromLibrary, setLibraryCategory } from '../lib/db';
+import { libraryCategories, patchChapterState, removeFromLibrary, setLibraryCategory } from '../lib/db';
+import { getLibrarySnapshot, loadLibrary, setLibrarySnapshot, subscribeLibrarySnapshot } from '../lib/libraryData';
 import { useNav } from '../lib/nav';
 import { saveSettings } from '../lib/settings';
 import { useSettings } from '../lib/hooks';
@@ -13,56 +14,14 @@ import { enqueueChapters } from '../lib/downloadQueue';
 import { compareLibraryItems, LIBRARY_SORT_OPTIONS } from '../lib/librarySort';
 import LibrarySortControls from '../components/LibrarySortControls';
 
-async function loadLibrary() {
-  const db = await getDB();
-  const tx = db.transaction(['library', 'manga', 'chapterMeta', 'chapterState', 'history', 'downloads'], 'readonly');
-  const [entries, mangas, metas, states, history, downloads] = await Promise.all([
-    tx.objectStore('library').getAll(), tx.objectStore('manga').getAll(), tx.objectStore('chapterMeta').getAll(),
-    tx.objectStore('chapterState').getAll(), tx.objectStore('history').getAll(), tx.objectStore('downloads').getAll(),
-  ]);
-  await tx.done;
-  const stored = new Map(mangas.map(m => [m.key, m]));
-  const state = new Map(states.map(s => [s.key, s]));
-  const downloaded = new Set(downloads.map(d => d.key));
-  const grouped = new Map<string, typeof metas>();
-  for (const meta of metas) { const list = grouped.get(meta.mangaKey) ?? []; list.push(meta); grouped.set(meta.mangaKey, list); }
-  const lastRead = new Map<string, number>();
-  for (const h of history) lastRead.set(h.mangaKey, Math.max(lastRead.get(h.mangaKey) ?? 0, h.updatedAt));
-  const items = entries.flatMap(entry => {
-    const manga = stored.get(entry.key);
-    if (!manga) return [];
-    const chapters = (grouped.get(entry.key) ?? []).filter(c => !c.chapter.external);
-    return [{ entry, stored: manga, chapters,
-      unread: chapters.filter(c => !state.get(c.key)?.read).length,
-      downloaded: chapters.filter(c => downloaded.has(c.key)).length,
-      bookmarked: chapters.some(c => state.get(c.key)?.bookmark), lastRead: lastRead.get(entry.key) ?? 0,
-      sort: { key: entry.key, title: manga.manga.title, added: entry.addedAt, read: lastRead.get(entry.key) ?? 0,
-        unread: chapters.filter(c => !state.get(c.key)?.read).length, chapters: chapters.length,
-        updated: Math.max(0, ...chapters.map(c => c.chapter.dateFetch ?? 0)),
-        latest: Math.max(0, ...chapters.map(c => c.chapter.dateUpload)),
-        fetched: Math.max(0, ...chapters.map(c => c.chapter.dateFetch ?? 0)) } }];
-  });
-  const resume = [...history].sort((a, b) => b.updatedAt - a.updatedAt).find(h => {
-    const manga = stored.get(h.mangaKey);
-    return items.some(i => i.entry.key === h.mangaKey) && !state.get(h.key)?.read &&
-      metas.some(m => m.key === h.key) && !!manga && (downloaded.has(h.key) || !!getSource(manga.manga.sourceId));
-  });
-  return { items, state, downloaded, resume, categories: await getCategories() };
-}
-type LibraryData = Awaited<ReturnType<typeof loadLibrary>>;
-
-// Session snapshot: the library view is assembled once per app load and
-// kept in memory. Tab switches render it instantly — no re-read of the
-// ~140k chapter/history records behind it. It is NOT event-driven: data
-// changes elsewhere (reading, sync pulls, other tabs) do not reload this
-// page. The view updates only when needed — after an action taken on this
-// page, or when the reader taps the refresh button. A full app reload
-// assembles it fresh.
-let librarySnapshot: LibraryData | null = null;
-
+// The library view reads the session snapshot from ../lib/libraryData
+// (assembled once per app load; patched live by the user's own actions —
+// reading progress, opening a title, adding/removing a title — and never
+// reshuffled by background sync). This hook only owns the full-reload
+// path (refresh button, in-page actions) and its loading/error state.
 function useLibraryData() {
-  const [data, setData] = useState<LibraryData | null>(() => librarySnapshot);
-  const [loading, setLoading] = useState(() => librarySnapshot === null);
+  const data = useSyncExternalStore(subscribeLibrarySnapshot, getLibrarySnapshot);
+  const [loading, setLoading] = useState(() => getLibrarySnapshot() === null);
   const [error, setError] = useState<string | null>(null);
   const run = useRef(0);
   const reload = useCallback(() => {
@@ -71,8 +30,7 @@ function useLibraryData() {
     setError(null);
     loadLibrary().then(result => {
       if (run.current !== current) return;
-      librarySnapshot = result;
-      setData(result);
+      setLibrarySnapshot(result);
       setLoading(false);
     }).catch(cause => {
       if (run.current !== current) return;
@@ -80,7 +38,7 @@ function useLibraryData() {
       setLoading(false);
     });
   }, []);
-  useEffect(() => { if (librarySnapshot === null) reload(); }, [reload]);
+  useEffect(() => { if (getLibrarySnapshot() === null) reload(); }, [reload]);
   return { data, loading, error, reload };
 }
 
