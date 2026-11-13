@@ -4,6 +4,7 @@ import { chapterKey, mangaKey } from '../src/sources/Source';
 import { addToLibrary, patchChapterState, putChapterMetas, putDownload, putManga, saveReadingProgress } from '../src/lib/db';
 import { applyLibraryLiveUpdate, getLibrarySnapshot, loadLibrary, loadLibraryItem, setLibrarySnapshot } from '../src/lib/libraryData';
 import { emitLibraryLive } from '../src/lib/libraryLive';
+import { activateAccountProfile } from '../src/lib/account';
 import { compareLibraryItems } from '../src/lib/librarySort';
 import { loadSettings } from '../src/lib/settings';
 import { testSource } from './fixtures/source';
@@ -137,6 +138,60 @@ it('adding a title inserts it first without a full reload', async () => {
   const loaded = await loadLibraryItem(c.key);
   expect(loaded?.item.unread).toBe(2);
   expect(await loadLibraryItem('nope::/none')).toBeNull();
+});
+
+it('library-invalidated reloads the snapshot with restored titles', async () => {
+  await seedAll();
+  const snapshot = await loadLibrary();
+  setLibrarySnapshot(snapshot);
+
+  // A fresh title (not Gamma — the test above already seeds it): the
+  // reload must pick up a title that was NOT in the snapshot.
+  const d = await seedTitle('live-d-source', '/hero-d', 'Delta', 2, T9);
+  emitLibraryLive({ type: 'library-invalidated' });
+
+  const deadline = Date.now() + 2000;
+  let next = getLibrarySnapshot();
+  while (!next?.items.some(i => i.entry.key === d.key) && Date.now() < deadline) {
+    await new Promise<void>(resolve => setTimeout(resolve, 10));
+    next = getLibrarySnapshot();
+  }
+
+  expect(next).not.toBe(snapshot);
+  expect(next?.items.find(i => i.entry.key === d.key)?.unread).toBe(2);
+  expect(next?.items.some(i => i.entry.key === a.key)).toBe(true);
+  expect(next?.items.some(i => i.entry.key === b.key)).toBe(true);
+});
+
+it('account switch replaces the snapshot with the new profile’s library', async () => {
+  await seedAll();
+  const snapshot = await loadLibrary();
+  setLibrarySnapshot(snapshot);
+  expect(snapshot.items.some(i => i.entry.key === a.key)).toBe(true);
+
+  // Switching to a fresh account profile empties the live library; the
+  // snapshot must follow (pre-fix it kept showing the previous profile's
+  // titles, and tapping one errored).
+  await activateAccountProfile('user-a');
+  const deadline = Date.now() + 2000;
+  let next = getLibrarySnapshot();
+  while (next === snapshot && Date.now() < deadline) {
+    await new Promise<void>(resolve => setTimeout(resolve, 10));
+    next = getLibrarySnapshot();
+  }
+  expect(next).not.toBe(snapshot);
+  expect(next?.items).toHaveLength(0);
+
+  // Switching back restores the guest library in the snapshot too.
+  await activateAccountProfile('guest');
+  const backBy = Date.now() + 2000;
+  let back = getLibrarySnapshot();
+  while (!back?.items.some(i => i.entry.key === a.key) && Date.now() < backBy) {
+    await new Promise<void>(resolve => setTimeout(resolve, 10));
+    back = getLibrarySnapshot();
+  }
+  expect(back?.items.some(i => i.entry.key === a.key)).toBe(true);
+  expect(back?.items.some(i => i.entry.key === b.key)).toBe(true);
 });
 
 it('removing a title drops it and recomputes the resume card', async () => {

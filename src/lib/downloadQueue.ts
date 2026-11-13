@@ -259,25 +259,34 @@ export async function cancelMangaDownloadJobs(mangaKey: string): Promise<void> {
   await refresh();
 }
 export async function clearDownloadQueue(): Promise<void> {
-  await setDownloadsPaused(true);
-  const jobs = await getDownloadJobs();
-  if (!jobs.length) { await refresh(); return; }
-  // Abort the in-flight download without awaiting it: waiting on its
-  // promise here could hang the whole clear behind one wedged fetch.
-  if (current) current.controller.abort(new DOMException('Queue cleared', 'AbortError'));
-  // Remove every job row in a single transaction first, so the queue is
-  // empty no matter what happens during page cleanup below.
+  await initDownloadQueue();
   const db = await getDB();
-  const tx = db.transaction('downloadQueue', 'readwrite');
-  for (const job of jobs) await tx.store.delete(job.key);
-  await tx.done;
-  await refresh();
-  // Partial pages are cleaned up per job, each isolated: one job whose
-  // cache cleanup throws must not strand the rest (the old loop removed
-  // jobs one at a time through removeDownloadJob, so the first failure
-  // stopped the clear with most chapters still listed).
-  for (const job of jobs) {
-    try { await deleteChapterDownload(job.mangaKey, job.key); } catch { /* keep clearing the rest */ }
+  const wasPaused = !!(await db.get('metadata', 'downloads:paused'))?.value;
+  try {
+    await setDownloadsPaused(true);
+    const jobs = await getDownloadJobs();
+    if (!jobs.length) { await refresh(); return; }
+    // Abort the in-flight download without awaiting it: waiting on its
+    // promise here could hang the whole clear behind one wedged fetch.
+    if (current) current.controller.abort(new DOMException('Queue cleared', 'AbortError'));
+    // Remove every job row in a single transaction first, so the queue is
+    // empty no matter what happens during page cleanup below.
+    const tx = db.transaction('downloadQueue', 'readwrite');
+    for (const job of jobs) await tx.store.delete(job.key);
+    await tx.done;
+    await refresh();
+    // Partial pages are cleaned up per job, each isolated: one job whose
+    // cache cleanup throws must not strand the rest (the old loop removed
+    // jobs one at a time through removeDownloadJob, so the first failure
+    // stopped the clear with most chapters still listed).
+    for (const job of jobs) {
+      try { await deleteChapterDownload(job.mangaKey, job.key); } catch { /* keep clearing the rest */ }
+    }
+    await refresh();
+  } finally {
+    // A clear must not strand later downloads in a paused queue with no
+    // visible resume control: restore the state from before the clear
+    // (same pattern connect() uses in account.ts when switching profiles).
+    await setDownloadsPaused(wasPaused);
   }
-  await refresh();
 }

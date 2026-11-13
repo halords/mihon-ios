@@ -2,6 +2,7 @@ import { chapterKey, mangaKey, type MangaStatus, type SChapter, type SManga } fr
 import { getSource } from '../sources';
 import { coverArt } from '../sources/svgArt';
 import { dispatchDataEvent, downloadRemovalKey, getCategories, getDB, libraryCategories, type CategoryRecord } from '../lib/db';
+import { emitLibraryLive } from '../lib/libraryLive';
 import { saveSettings, type ReaderMode } from '../lib/settings';
 import { mihonLibrarySort } from '../lib/librarySort';
 import { blobPart } from '../lib/bytes';
@@ -270,6 +271,8 @@ export async function restoreTachibk(preview: TachibkPreview, options: RestoreOp
     if (sort) saveSettings(sort);
   }
   dispatchDataEvent();
+  // Restored titles must replace the stale session snapshot.
+  emitLibraryLive({ type: 'library-invalidated' });
   return result;
 }
 

@@ -105,6 +105,8 @@ export async function loadLibraryItem(mangaKey: string): Promise<LibraryItemLoad
 // progress repeatedly while a finished chapter stays open).
 export async function applyLibraryLiveUpdate(snapshot: LibraryData, update: LibraryLiveUpdate): Promise<LibraryData> {
   switch (update.type) {
+    case 'library-invalidated':
+      return loadLibrary();
     case 'chapter-progress': {
       const item = snapshot.items.find(i => i.entry.key === update.mangaKey);
       if (!item) return snapshot;
@@ -150,9 +152,10 @@ export async function applyLibraryLiveUpdate(snapshot: LibraryData, update: Libr
 // It DOES patch live for the user's own actions (see libraryLive.ts):
 // reading progress — a chapter opened and loaded bumps its title to the
 // top — and adding/removing a title. Merely opening a title's details
-// page does not move it. The view also reloads fully after an action
-// taken on the Library page itself, when the reader taps the refresh
-// button, or on a full app reload.
+// page does not move it. The view also reloads fully after backup restore
+// or an account/profile switch (including device-library adoption), an
+// action taken on the Library page itself, a refresh tap, or a full app
+// reload.
 let librarySnapshot: LibraryData | null = null;
 const snapshotListeners = new Set<() => void>();
 

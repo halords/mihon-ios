@@ -16,12 +16,15 @@ import type { HistoryRecord } from './db';
 //   nothing (user correction, 2026-11-12).
 // - library-added / library-removed: the details page, after the library
 //   entry is written.
+// - library-invalidated: ONLY backup restore, account-profile switch,
+//   and the device-library adoption merge; reloads the whole snapshot.
 // Sync pulls deliberately NEVER emit these: background sync must not
 // reshuffle the visible Library (session-snapshot rule, 2026-11-10).
 export type LibraryLiveUpdate =
   | { type: 'chapter-progress'; mangaKey: string; chapterKey: string; history: HistoryRecord; read: boolean; downloadedDeleted: boolean }
   | { type: 'library-added'; mangaKey: string }
-  | { type: 'library-removed'; mangaKey: string };
+  | { type: 'library-removed'; mangaKey: string }
+  | { type: 'library-invalidated' };
 
 const listeners = new Set<(update: LibraryLiveUpdate) => void>();
 

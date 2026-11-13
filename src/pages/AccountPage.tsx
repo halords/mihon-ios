@@ -34,6 +34,7 @@ export default function AccountPage() {
         <p className="muted">{account.pending ? `${account.pending} changes waiting to sync.` : 'Library, arrangement, categories, reading position, bookmarks and history.'}</p>
         <p className="account-sync-time">{account.lastSync ? `Last synced ${new Date(account.lastSync).toLocaleString()}` : 'Your first sync is getting ready.'}</p>
         {account.error && <p className="account-sync-error">{account.error}</p>}
+        {!!account.quarantined && <p className="account-sync-error">{account.quarantined} record{account.quarantined === 1 ? '' : 's'} couldn’t sync and {account.quarantined === 1 ? 'was' : 'were'} set aside. Export your library and report this error.</p>}
         <button className="btn wide" disabled={!online || busy || account.status === 'syncing'} onClick={() => void run(syncAccount)}><Icon name="refresh" size={18} />{account.status === 'syncing' ? 'Syncing…' : 'Sync now'}</button>
       </section>
       {account.recoveryCode && <section className="settings-card account-recovery"><h3>Save your recovery code</h3><p className="muted">You can reset a forgotten password with this code. It is shown only now.</p><code>{account.recoveryCode}</code><div className="button-row"><button className="text-btn" onClick={() => void navigator.clipboard.writeText(account.recoveryCode).then(() => toast('Recovery code copied')).catch(() => toast('Select the code to copy it'))}>Copy code</button><button className="text-btn" onClick={dismissRecoveryCode}>I’ve saved it</button></div></section>}

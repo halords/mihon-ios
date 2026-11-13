@@ -1,6 +1,7 @@
 import { useSyncExternalStore } from 'react';
 import { unwrap } from 'idb';
 import { getDB, getRawDB, importData, dispatchDataEvent, downloadRemovalKey, type BackupData } from './db';
+import { emitLibraryLive } from './libraryLive';
 import { newer, PROFILE_STORES, validChange, type AccountUser, type DeviceProfile, type ProfileChunk, type ProfileManifest, type RemoteChange, type StoredProfile, type SyncRecord } from './syncTypes';
 import { observeSyncClock, setSyncProfileContext } from './syncStorage';
 import { DEFAULT_SETTINGS, libraryArrangement, onLibraryArrangementChange, saveSettings, type LibraryArrangement } from './settings';
@@ -8,9 +9,9 @@ import { DEFAULT_SETTINGS, libraryArrangement, onLibraryArrangementChange, saveS
 export interface AccountState {
   configured: boolean | null; user: AccountUser | null;
   status: 'loading' | 'signed-out' | 'syncing' | 'ready' | 'offline' | 'error';
-  lastSync: number; pending: number; error: string; deviceLibrary: number; recoveryCode: string;
+  lastSync: number; pending: number; quarantined: number; error: string; deviceLibrary: number; recoveryCode: string;
 }
-let state: AccountState = { configured: null, user: null, status: 'loading', lastSync: 0, pending: 0, error: '', deviceLibrary: 0, recoveryCode: '' };
+let state: AccountState = { configured: null, user: null, status: 'loading', lastSync: 0, pending: 0, quarantined: 0, error: '', deviceLibrary: 0, recoveryCode: '' };
 const listeners = new Set<() => void>();
 const publish = (patch: Partial<AccountState>) => { state = { ...state, ...patch }; for (const listener of listeners) listener(); };
 export function getAccountState(): AccountState { return state; }
@@ -153,6 +154,8 @@ export async function activateAccountProfile(userId: string): Promise<void> {
   observeSyncClock(next?.clock ?? 0); setSyncProfileContext(userId);
   await restoreLibraryArrangement();
   dispatchDataEvent(); dispatchDataEvent('mihon:downloads-changed');
+  // Replace the previous profile's library snapshot after the switch lands.
+  emitLibraryLive({ type: 'library-invalidated' });
   channel?.postMessage({ type: 'profile', userId });
 }
 export async function acknowledgeChanges(sent: SyncRecord[], userId: string): Promise<void> {
@@ -266,11 +269,15 @@ async function scanSyncRecords(db: Awaited<ReturnType<typeof getRawDB>>, visit: 
 async function summary(): Promise<void> {
   const db = await getRawDB();
   let pending = 0;
-  const [, last, guestCount] = await Promise.all([
+  const [, last, guestCount, quarantined] = await Promise.all([
     scanSyncRecords(db, record => { if (record.pending) pending++; }),
     db.get('syncControl', 'lastSync'), guestProfileCount(db),
+    db.get('metadata', 'sync:quarantined'),
   ]);
-  publish({ pending, lastSync: Number(last?.value ?? 0), deviceLibrary: guestCount });
+  publish({
+    pending, lastSync: Number(last?.value ?? 0), deviceLibrary: guestCount,
+    quarantined: Array.isArray(quarantined?.value) ? quarantined.value.length : 0,
+  });
 }
 export function syncAccount(): Promise<void> {
   if (running) return running;
@@ -293,19 +300,38 @@ async function cycle(): Promise<void> {
     // Still strictly sequential: send, acknowledge, publish the new
     // pending count, then the next batch.
     const encoder = new TextEncoder();
+    const quarantined: SyncRecord[] = [];
     for (let start = 0; start < pending.length;) {
       if (generation !== currentGeneration) return;
       const batch: SyncRecord[] = []; let bytes = 16; // {"changes":[]} envelope
       while (start < pending.length && batch.length < 4000) {
-        const record = pending[start]!; const size = encoder.encode(JSON.stringify(record)).length + 1;
+        const record = pending[start]!;
+        if (!validChange(record)) {
+          quarantined.push(record); start++;
+          continue;
+        }
+        const size = encoder.encode(JSON.stringify(record)).length + 1;
         if (batch.length && bytes + size > 3.5 * 1024 * 1024) break;
-        if (!validChange(record)) throw new Error('A local record cannot be synced. Export your library and report this error.');
         batch.push(record); bytes += size; start++;
       }
+      if (!batch.length) continue;
       await request('push', { changes: batch }, accountId, 120000);
       if (generation !== currentGeneration) return;
       await acknowledgeChanges(batch, accountId);
       await summary();
+    }
+    if (quarantined.length) {
+      // One oversized/corrupt local record must not wedge all of sync:
+      // pending 0 stops the by-pending scan retrying it every open, its
+      // id is stashed in metadata for the Account page count, and a later
+      // edit re-journals the record as pending so it is validated fresh.
+      const tx = db.transaction(['syncRecords', 'metadata'], 'readwrite');
+      for (const record of quarantined) await tx.objectStore('syncRecords').put({ ...record, pending: 0 });
+      const saved = await tx.objectStore('metadata').get('sync:quarantined');
+      const ids = new Set<string>(Array.isArray(saved?.value) ? saved.value : []);
+      for (const record of quarantined) ids.add(record.id);
+      await tx.objectStore('metadata').put({ key: 'sync:quarantined', value: [...ids] });
+      await tx.done;
     }
     let cursor = Number((await db.get('syncControl', 'cursor'))?.value ?? 0);
     for (;;) {
@@ -357,6 +383,8 @@ export async function addDeviceLibrary(): Promise<void> {
   dispatchDataEvent('mihon:downloads-changed');
   const { setDownloadsPaused } = await import('./downloadQueue');
   await setDownloadsPaused(!!(await db.get('metadata', 'downloads:paused'))?.value);
+  // The profile-switch reload may precede this merge; reload again after adoption.
+  emitLibraryLive({ type: 'library-invalidated' });
   await summary(); await syncAccount();
 }
 async function connect(user: AccountUser): Promise<void> {

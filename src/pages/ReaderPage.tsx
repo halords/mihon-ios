@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { getChapterState, patchChapterState, patchManga, saveReadingProgress } from '../lib/db';
+import { getChapterState, patchChapterState, patchManga, saveReadingProgress, type HistoryRecord } from '../lib/db';
 import { getCachedPageList, maybeAutoDeleteReadChapter, PAGES_CACHE, revokeBlobUrls } from '../lib/downloads';
 import { emitLibraryLive } from '../lib/libraryLive';
 import { loadMangaData } from '../lib/mangaData';
@@ -127,17 +127,24 @@ export default function ReaderPage({ mangaKey, chapterId }: { mangaKey: string; 
   const active = segments[activeIndex] ?? reader?.anchor;
   const count = active?.pages.length ?? 0;
 
+  const pendingAutoDelete = useRef(new Map<string, { mangaKey: string; history: HistoryRecord }>());
   const flush = useCallback((force = false) => {
     const current = position.current;
     const data = readerRef.current;
     if (!current || !data) return;
     const now = Date.now();
+    const history = { key: current.segment.key, mangaKey, mangaTitle: data.manga.title, coverUrl: data.manga.coverUrl,
+      chapterName: current.segment.chapter.name, page: current.page, updatedAt: now, readDuration: 0 };
+    // Queue finished chapters for auto-delete synchronously, BEFORE the
+    // throttle guard: a chapter finished just before navigation must be
+    // queued even when this flush is throttled, or the exit cleanup
+    // would snapshot the map before the async save callback queues it.
+    if (current.read) pendingAutoDelete.current.set(current.segment.key, { mangaKey, history });
     if (!force && now - lastSave.current < 350) return;
     lastSave.current = now;
     const duration = document.hidden ? 0 : Math.max(0, Math.min(30000, now - durationStart.current));
     durationStart.current = now;
-    const history = { key: current.segment.key, mangaKey, mangaTitle: data.manga.title, coverUrl: data.manga.coverUrl,
-      chapterName: current.segment.chapter.name, page: current.page, updatedAt: now, readDuration: duration };
+    history.readDuration = duration;
     writeChain.current = writeChain.current.then(async () => {
       try { await saveReadingProgress(history, current.read, current.offset); }
       catch { toast('Unable to save reading progress. Check device storage.'); return; }
@@ -145,9 +152,9 @@ export default function ReaderPage({ mangaKey, chapterId }: { mangaKey: string; 
       // patches this chapter's read/downloaded counts, last-read time and
       // continue-reading card from the saved progress — no refresh tap.
       // Only emitted after a successful save, so the snapshot never runs
-      // ahead of IndexedDB.
-      const deleted = current.read ? await maybeAutoDeleteReadChapter(mangaKey, current.segment.key).catch(() => false) : false;
-      emitLibraryLive({ type: 'chapter-progress', mangaKey, chapterKey: current.segment.key, history, read: current.read, downloadedDeleted: deleted });
+      // ahead of IndexedDB. Auto-delete is deferred until reader exit,
+      // so cached pages remain available while the reader shows them.
+      emitLibraryLive({ type: 'chapter-progress', mangaKey, chapterKey: current.segment.key, history, read: current.read, downloadedDeleted: false });
     });
   }, [mangaKey]);
   const restorePosition = useCallback(() => {
@@ -193,6 +200,22 @@ export default function ReaderPage({ mangaKey, chapterId }: { mangaKey: string; 
     return () => {
       alive = false; abort.abort(); generation.current++; clearTimeout(restoreTimeout); clearTimeout(tap.current);
       flush(true);
+      // Deferred auto-delete: finished chapters are deleted only now
+      // that the reader is leaving them, so scroll-back and "Return to
+      // last page" keep working while it is open. Chained after the
+      // write chain so the final read-flag save lands first. If the tab
+      // is killed before exit, the downloads simply stay until the next
+      // read-through exit.
+      const pending = [...pendingAutoDelete.current];
+      pendingAutoDelete.current.clear();
+      if (pending.length) {
+        writeChain.current = writeChain.current.then(async () => {
+          for (const [key, { mangaKey: titleKey, history }] of pending) {
+            const deleted = await maybeAutoDeleteReadChapter(titleKey, key).catch(() => false);
+            if (deleted) emitLibraryLive({ type: 'chapter-progress', mangaKey: titleKey, chapterKey: key, history, read: true, downloadedDeleted: true });
+          }
+        }).catch(() => {});
+      }
       for (const segment of segmentsRef.current) revokeBlobUrls(segment.pages.map(p => p.imageUrl));
       revokeBlobUrls(anchorUrls);
     };

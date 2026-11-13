@@ -10,7 +10,7 @@ vi.mock('../src/lib/downloads', () => ({
 }));
 
 const { getDB, getDownloadJobs, putManga, putChapterMetas } = await import('../src/lib/db');
-const { clearDownloadQueue, enqueueChapters } = await import('../src/lib/downloadQueue');
+const { clearDownloadQueue, enqueueChapters, getQueueSnapshot, setDownloadsPaused } = await import('../src/lib/downloadQueue');
 const { registerSource, unregisterSource } = await import('../src/sources');
 const { testSource } = await import('./fixtures/source');
 
@@ -46,4 +46,30 @@ it('one failing page cleanup does not strand the rest of the queue', async () =>
   await clearDownloadQueue();
   expect(await getDownloadJobs()).toHaveLength(0);
   expect(deleteChapterDownload).toHaveBeenCalledTimes(ids.length);
+});
+
+it('clear queue restores the unpaused state so later downloads run', async () => {
+  // The module-level queue snapshot persists across tests in this file;
+  // normalize first, then set up (setup seeds paused=true) and unpause.
+  await setDownloadsPaused(false);
+  const ids = await setup();
+  await setDownloadsPaused(false);
+  await clearDownloadQueue();
+  expect(getQueueSnapshot().paused).toBe(false);
+  expect((await (await getDB()).get('metadata', 'downloads:paused'))?.value).toBe(false);
+  // A chapter enqueued after the clear must actually download (the pump
+  // runs it through the mocked downloadChapter) instead of stalling.
+  await enqueueChapters(key, [ids[0]!]);
+  const deadline = Date.now() + 2000;
+  while ((await getDownloadJobs()).length && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 10));
+  expect(await getDownloadJobs()).toHaveLength(0);
+});
+
+it('clear queue keeps the queue paused when it was paused before', async () => {
+  await setDownloadsPaused(true);
+  await setup();
+  await clearDownloadQueue();
+  expect(getQueueSnapshot().paused).toBe(true);
+  expect((await (await getDB()).get('metadata', 'downloads:paused'))?.value).toBe(true);
+  expect(await getDownloadJobs()).toHaveLength(0);
 });
