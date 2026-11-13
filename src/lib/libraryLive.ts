@@ -14,6 +14,9 @@ import type { HistoryRecord } from './db';
 //   the move-to-top signal: a title jumps to the top only when one of its
 //   chapters is opened AND loaded. Merely opening the details page emits
 //   nothing (user correction, 2026-11-12).
+// - counts-changed: the details page, after mark/bookmark/download/delete
+//   actions, and the download queue when a job completes. Reloads one
+//   title's counts without moving it. Enqueueing alone does not emit.
 // - library-added / library-removed: the details page, after the library
 //   entry is written.
 // - library-invalidated: ONLY backup restore, account-profile switch,
@@ -22,6 +25,7 @@ import type { HistoryRecord } from './db';
 // reshuffle the visible Library (session-snapshot rule, 2026-11-10).
 export type LibraryLiveUpdate =
   | { type: 'chapter-progress'; mangaKey: string; chapterKey: string; history: HistoryRecord; read: boolean; downloadedDeleted: boolean }
+  | { type: 'counts-changed'; mangaKey: string }
   | { type: 'library-added'; mangaKey: string }
   | { type: 'library-removed'; mangaKey: string }
   | { type: 'library-invalidated' };

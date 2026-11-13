@@ -215,3 +215,83 @@ it('emitted events patch the module snapshot with no reload', async () => {
   expect(patched).not.toBe(snapshot);
   expect(patched.items.find(i => i.entry.key === a.key)).toMatchObject({ unread: 2, downloaded: 0 });
 });
+
+it('counts-changed refreshes one title\'s counts without moving it', async () => {
+  await seedAll();
+  const snapshot = await loadLibrary();
+  const item = snapshot.items.find(i => i.entry.key === a.key)!;
+  const other = snapshot.items.find(i => i.entry.key === b.key)!;
+  expect(item.unread).toBe(3);
+  expect(item.downloaded).toBe(1);
+  expect(item.sort.read).toBe(T1);
+  expect(item.entry.addedAt).toBeGreaterThan(T1);
+  expect(other.sort.read).toBe(0);
+  const settings = loadSettings();
+  expect(settings.librarySort).toBe('read');
+  const before = [...snapshot.items].sort((x, y) => compareLibraryItems(x.sort, y.sort, settings));
+  expect(before[0]!.entry.key).toBe(a.key);
+
+  await patchChapterState(a.chapterKeys[1]!, a.key, { read: true });
+  await putDownload({ key: a.chapterKeys[2]!, mangaKey: a.key, pageCount: 10, downloadedAt: T0 });
+  await patchChapterState(a.chapterKeys[2]!, a.key, { downloaded: true });
+
+  const next = await applyLibraryLiveUpdate(snapshot, { type: 'counts-changed', mangaKey: a.key });
+  expect(next).not.toBe(snapshot);
+  const updated = next.items.find(i => i.entry.key === a.key)!;
+  expect(updated.unread).toBe(2);
+  expect(updated.downloaded).toBe(2);
+  expect(updated.sort.unread).toBe(2);
+  expect(updated.lastRead).toBe(T1);
+  // Do not inherit the targeted loader's newly-added sort boost.
+  expect(updated.sort.read).toBe(T1);
+  expect(next.items.find(i => i.entry.key === b.key)).toBe(other);
+  expect(next.history).toBe(snapshot.history);
+  expect(next.state.get(a.chapterKeys[1]!)).toMatchObject({ read: true });
+  expect(next.downloaded.has(a.chapterKeys[2]!)).toBe(true);
+  const after = [...next.items].sort((x, y) => compareLibraryItems(x.sort, y.sort, settings));
+  expect(after[0]!.entry.key).toBe(a.key);
+
+  const again = await applyLibraryLiveUpdate(next, { type: 'counts-changed', mangaKey: a.key });
+  expect(again.items.find(i => i.entry.key === a.key)).toMatchObject({
+    unread: 2, downloaded: 2, lastRead: T1, sort: { unread: 2, read: T1 },
+  });
+  expect(again.items.find(i => i.entry.key === b.key)).toBe(other);
+});
+
+it('counts-changed updates the bookmarked flag', async () => {
+  await seedAll();
+  const snapshot = await loadLibrary();
+  expect(snapshot.items.find(i => i.entry.key === a.key)!.bookmarked).toBe(false);
+
+  await patchChapterState(a.chapterKeys[0]!, a.key, { bookmark: true });
+  const next = await applyLibraryLiveUpdate(snapshot, { type: 'counts-changed', mangaKey: a.key });
+  expect(next.items.find(i => i.entry.key === a.key)!.bookmarked).toBe(true);
+
+  await patchChapterState(a.chapterKeys[0]!, a.key, { bookmark: false });
+  const cleared = await applyLibraryLiveUpdate(next, { type: 'counts-changed', mangaKey: a.key });
+  expect(cleared.items.find(i => i.entry.key === a.key)!.bookmarked).toBe(false);
+});
+
+it('counts-changed for an unknown title is a no-op', async () => {
+  await seedAll();
+  const snapshot = await loadLibrary();
+  expect(await applyLibraryLiveUpdate(snapshot, { type: 'counts-changed', mangaKey: 'nope::/none' })).toBe(snapshot);
+});
+
+it('emitted counts-changed patches the module snapshot with no reload', async () => {
+  await seedAll();
+  const snapshot = await loadLibrary();
+  setLibrarySnapshot(snapshot);
+  await patchChapterState(a.chapterKeys[1]!, a.key, { read: true });
+  emitLibraryLive({ type: 'counts-changed', mangaKey: a.key });
+  for (let i = 0; i < 5; i++) await new Promise(resolve => setTimeout(resolve, 0));
+
+  const deadline = Date.now() + 2000;
+  let patched = getLibrarySnapshot();
+  while ((!patched || patched === snapshot || patched.items.find(i => i.entry.key === a.key)?.unread !== 2) && Date.now() < deadline) {
+    await new Promise<void>(resolve => setTimeout(resolve, 10));
+    patched = getLibrarySnapshot();
+  }
+  expect(patched).not.toBe(snapshot);
+  expect(patched?.items.find(i => i.entry.key === a.key)?.unread).toBe(2);
+});

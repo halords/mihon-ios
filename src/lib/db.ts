@@ -710,8 +710,13 @@ export function validateBackupData(input: unknown): BackupData {
 
 // Validate and decode everything before opening a write transaction. A bad
 // backup never leaves a half-restored library, and newer local reads survive.
-export async function importData(input: unknown, restorePlugins = false): Promise<void> {
+export async function importData(input: unknown, restorePlugins = false, options: { onProgress?: (done: number, total: number) => void } = {}): Promise<void> {
   const data = validateBackupData(input);
+  if (restorePlugins) {
+    for (const r of data.plugins ?? []) {
+      if (!r || typeof r.id !== 'string' || typeof r.code !== 'string') throw new Error('Invalid web extension');
+    }
+  }
   const archives = (data.archives ?? []).map(({ base64, ...a }) => ({ ...a, bytes: fromBase64(base64) }));
   const { isChapterCached } = await import('./downloads');
   const usableDownloads = new Map<string, DownloadRecord>();
@@ -719,52 +724,90 @@ export async function importData(input: unknown, restorePlugins = false): Promis
   for (const download of [...await db.getAll('downloads'), ...data.downloads]) {
     if (await isChapterCached(download.key, download.pageCount, download.cacheKey)) usableDownloads.set(download.key, download);
   }
-  const tx = db.transaction(['manga', 'chapterMeta', 'chapterState', 'library', 'history', 'downloads', 'categories', 'metadata', 'archives', 'plugins'], 'readwrite');
+  // Group title-owned records up front so each transaction only touches
+  // the chapters, library memberships and history for its title.
+  const chapterMetas = new Map<string, BackupData['chapterMeta']>();
+  const chapterStates = new Map<string, BackupData['chapterState']>();
+  const libraryEntries = new Map<string, BackupData['library']>();
+  const histories = new Map<string, BackupData['history']>();
+  for (const r of data.chapterMeta) {
+    const rows = chapterMetas.get(r.mangaKey) ?? [];
+    rows.push(r);
+    chapterMetas.set(r.mangaKey, rows);
+  }
+  for (const r of data.chapterState) {
+    const rows = chapterStates.get(r.mangaKey) ?? [];
+    rows.push(r);
+    chapterStates.set(r.mangaKey, rows);
+  }
+  for (const r of data.library) {
+    const rows = libraryEntries.get(r.key) ?? [];
+    rows.push(r);
+    libraryEntries.set(r.key, rows);
+  }
+  for (const r of data.history) {
+    const rows = histories.get(r.mangaKey) ?? [];
+    rows.push(r);
+    histories.set(r.mangaKey, rows);
+  }
+  // One transaction per title instead of a single transaction for the whole
+  // backup. Per-title commits make progress permanent title by title, and
+  // re-running an interrupted import is safe: every merge is idempotent.
+  // On failure only the in-flight title rolls back; earlier titles stay.
+  let activeTx: { abort(): void; done: Promise<void> } | undefined;
   try {
-    for (const r of data.manga) {
+    for (const [index, r] of data.manga.entries()) {
+      const tx = db.transaction(['manga', 'chapterMeta', 'chapterState', 'library', 'history', 'metadata'], 'readwrite');
+      activeTx = tx;
+      const key = r.key;
       const existing = await tx.objectStore('manga').get(r.key);
       await tx.objectStore('manga').put(existing && existing.updatedAt > r.updatedAt ? existing : { ...existing, ...r });
+      for (const r of chapterMetas.get(key) ?? []) await tx.objectStore('chapterMeta').put(r);
+      for (const r of chapterStates.get(key) ?? []) {
+        const old = await tx.objectStore('chapterState').get(r.key);
+        const newer = (old?.lastReadAt ?? 0) > (r.lastReadAt ?? 0);
+        await tx.objectStore('chapterState').put({
+          ...r, ...old, read: newer ? old!.read : (r.lastReadAt ?? 0) > (old?.lastReadAt ?? 0) ? r.read : r.read || !!old?.read,
+          bookmark: !!r.bookmark || !!old?.bookmark,
+          lastPage: newer ? old!.lastPage : Math.max(r.lastPage, old?.lastPage ?? 0),
+          pageOffset: newer ? old!.pageOffset : r.pageOffset ?? old?.pageOffset,
+          lastReadAt: Math.max(r.lastReadAt ?? 0, old?.lastReadAt ?? 0),
+          downloaded: usableDownloads.has(r.key),
+        });
+      }
+      for (const r of libraryEntries.get(key) ?? []) {
+        await tx.objectStore('metadata').delete(downloadRemovalKey(r.key));
+        const old = await tx.objectStore('library').get(r.key);
+        const categories = [...new Set([...libraryCategories(r), ...(old ? libraryCategories(old) : [])])];
+        await tx.objectStore('library').put({ ...r, category: categories[0]!, categories, addedAt: old?.addedAt ?? r.addedAt });
+      }
+      for (const r of histories.get(key) ?? []) {
+        const old = await tx.objectStore('history').get(r.key);
+        if (!old || r.updatedAt > old.updatedAt) await tx.objectStore('history').put(r);
+      }
+      await tx.done;
+      options.onProgress?.(index + 1, data.manga.length);
     }
-    for (const r of data.chapterMeta) await tx.objectStore('chapterMeta').put(r);
-    for (const r of data.chapterState) {
-      const old = await tx.objectStore('chapterState').get(r.key);
-      const newer = (old?.lastReadAt ?? 0) > (r.lastReadAt ?? 0);
-      await tx.objectStore('chapterState').put({
-        ...r, ...old, read: newer ? old!.read : (r.lastReadAt ?? 0) > (old?.lastReadAt ?? 0) ? r.read : r.read || !!old?.read,
-        bookmark: !!r.bookmark || !!old?.bookmark,
-        lastPage: newer ? old!.lastPage : Math.max(r.lastPage, old?.lastPage ?? 0),
-        pageOffset: newer ? old!.pageOffset : r.pageOffset ?? old?.pageOffset,
-        lastReadAt: Math.max(r.lastReadAt ?? 0, old?.lastReadAt ?? 0),
-        downloaded: usableDownloads.has(r.key),
-      });
-    }
-    for (const r of data.library) {
-      await tx.objectStore('metadata').delete(downloadRemovalKey(r.key));
-      const old = await tx.objectStore('library').get(r.key);
-      const categories = [...new Set([...libraryCategories(r), ...(old ? libraryCategories(old) : [])])];
-      await tx.objectStore('library').put({ ...r, category: categories[0]!, categories, addedAt: old?.addedAt ?? r.addedAt });
-    }
-    for (const r of data.history) {
-      const old = await tx.objectStore('history').get(r.key);
-      if (!old || r.updatedAt > old.updatedAt) await tx.objectStore('history').put(r);
-    }
-    for (const r of await tx.objectStore('downloads').getAll()) if (!usableDownloads.has(r.key)) await tx.objectStore('downloads').delete(r.key);
-    for (const r of usableDownloads.values()) await tx.objectStore('downloads').put(r);
-    for (const r of data.categories ?? []) await tx.objectStore('categories').put(r);
-    for (const r of data.metadata ?? []) await tx.objectStore('metadata').put(r);
-    for (const r of archives) await tx.objectStore('archives').put(r);
+    // Backup-level records land last, in their own transaction, so a
+    // retained original archive always represents a completed import.
+    const finalTx = db.transaction(['downloads', 'categories', 'metadata', 'archives', 'plugins'], 'readwrite');
+    activeTx = finalTx;
+    for (const r of await finalTx.objectStore('downloads').getAll()) if (!usableDownloads.has(r.key)) await finalTx.objectStore('downloads').delete(r.key);
+    for (const r of usableDownloads.values()) await finalTx.objectStore('downloads').put(r);
+    for (const r of data.categories ?? []) await finalTx.objectStore('categories').put(r);
+    for (const r of data.metadata ?? []) await finalTx.objectStore('metadata').put(r);
+    for (const r of archives) await finalTx.objectStore('archives').put(r);
     if (restorePlugins) {
       for (const r of data.plugins ?? []) {
-        if (!r || typeof r.id !== 'string' || typeof r.code !== 'string') throw new Error('Invalid web extension');
-        await tx.objectStore('plugins').put(r);
+        await finalTx.objectStore('plugins').put(r);
       }
     } else if (data.plugins?.length) {
-      await tx.objectStore('metadata').put({ key: 'restored-web-extensions', value: data.plugins });
+      await finalTx.objectStore('metadata').put({ key: 'restored-web-extensions', value: data.plugins });
     }
-    await tx.done;
+    await finalTx.done;
   } catch (error) {
-    try { tx.abort(); } catch { /* already aborted */ }
-    await tx.done.catch(() => {});
+    try { activeTx?.abort(); } catch { /* already aborted */ }
+    await activeTx?.done.catch(() => {});
     throw error;
   }
   if (data.settings) saveSettings(data.settings);

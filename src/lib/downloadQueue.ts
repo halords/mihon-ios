@@ -1,6 +1,7 @@
-import { getDB, getDownloadJobs, getManga, getChapterMetas, type DownloadJob } from './db';
+import { getDB, getDownloadJobs, getManga, getChapterMetas, isMangaDownloadRemoved, type DownloadJob } from './db';
 import { chapterKey, splitMangaKey } from '../sources/Source';
 import { downloadChapter, deleteChapterDownload, isChapterCached } from './downloads';
+import { emitLibraryLive } from './libraryLive';
 
 type QueueSnapshot = { jobs: DownloadJob[]; paused: boolean; offline: boolean };
 let snapshot: QueueSnapshot = { jobs: [], paused: false, offline: false };
@@ -10,6 +11,7 @@ let pumping = false;
 let pumpRequested = false;
 let current: { key: string; controller: AbortController } | undefined;
 let channel: BroadcastChannel | undefined;
+let retryTimer: ReturnType<typeof setTimeout> | undefined;
 const networkOffline = () => navigator.onLine === false;
 
 /** DownloadJob plus the queue's automatic-retry bookkeeping. Kept off the
@@ -25,9 +27,9 @@ const MAX_AUTO_RETRIES = 2;
  * shorten them instead of waiting in real time. */
 export const AUTO_RETRY_DELAYS_MS = { transient: [5000, 15000], rateLimit: [60000, 180000] };
 /** Failures that retrying cannot fix; these fail immediately, as before. */
-const NON_TRANSIENT_MESSAGES = ['Device storage is full', 'removed from your library', 'no downloadable pages', 'too many pages', 'has no image URL'];
+const NON_TRANSIENT_MESSAGES = ['Device storage is full', 'removed from your library', 'Add this title back to your library', 'no downloadable pages', 'too many pages', 'has no image URL'];
 function isRateLimitMessage(message: string): boolean {
-  return message.includes('HTTP 429') || message.includes('HTTP 503');
+  return message.includes('HTTP 429') || message.includes('HTTP 503') || message.toLowerCase().includes('rate limit');
 }
 /** Cooldown before the next automatic retry, or undefined when the job
  * should be marked failed: a non-transient error, or retries exhausted. */
@@ -36,23 +38,6 @@ function autoRetryDelay(message: string, used: number): number | undefined {
   if (used >= MAX_AUTO_RETRIES) return undefined;
   const delays = isRateLimitMessage(message) ? AUTO_RETRY_DELAYS_MS.rateLimit : AUTO_RETRY_DELAYS_MS.transient;
   return delays[used];
-}
-/** Sleep until the earliest queued retry cooldown expires. The due time
- * is re-read every tick — a job's notBefore can move while waiting (a
- * manual edit, another tab), and sleeping to a stale deadline would
- * strand the retry. Returns false when the pump should stop instead
- * (queue paused or connection lost); the jobs stay queued either way
- * and a later pump picks them up. */
-async function waitForRetryDue(): Promise<boolean> {
-  for (;;) {
-    if (snapshot.paused || networkOffline()) return false;
-    const queued = (await getDownloadJobs() as DownloadJobRecord[]).filter(j => j.status === 'queued');
-    if (!queued.length) return true;
-    const dueAt = Math.min(...queued.map(j => j.notBefore ?? 0));
-    if (dueAt <= Date.now()) return true;
-    await new Promise(resolve => setTimeout(resolve, Math.min(250, Math.max(10, dueAt - Date.now()))));
-    await refresh(false);
-  }
 }
 
 export function subscribeDownloads(fn: () => void): () => void { listeners.add(fn); return () => listeners.delete(fn); }
@@ -86,6 +71,8 @@ export function initDownloadQueue(): Promise<void> {
 }
 
 async function processQueue(): Promise<void> {
+  if (retryTimer !== undefined) clearTimeout(retryTimer);
+  retryTimer = undefined;
   let wakeLock: WakeLockSentinel | undefined;
   try {
     // This runs inside the queue lock: no other tab can own these jobs.
@@ -100,12 +87,18 @@ async function processQueue(): Promise<void> {
       const now = Date.now();
       const queued = waiting.filter(j => (j.notBefore ?? 0) <= now);
       if (!queued.length) {
-        // Only auto-retry cooldowns remain: wait for the earliest one
-        // instead of dropping the pump — nothing else would re-arm it,
-        // and exiting here would strand the retry until the next
-        // unrelated queue event.
-        if (!await waitForRetryDue()) break;
-        continue;
+        // Only auto-retry cooldowns remain: schedule a fallback pump and
+        // exit to release the Web Lock and wake lock. Queue events can
+        // pump sooner. The pump no longer notices raw IndexedDB edits
+        // that bypass queue APIs — all real edit paths go through queue
+        // APIs or BroadcastChannel.
+        const dueAt = Math.min(...waiting.map(j => j.notBefore ?? 0));
+        if (retryTimer !== undefined) clearTimeout(retryTimer);
+        retryTimer = setTimeout(() => {
+          retryTimer = undefined;
+          void pump();
+        }, Math.max(0, dueAt - Date.now()));
+        break;
       }
       // Chapters download oldest first within each title (chapter number
       // ascending), so a series is readable from the start while the rest
@@ -140,6 +133,8 @@ async function processQueue(): Promise<void> {
           await refresh();
         }, controller.signal);
         await db.delete('downloadQueue', job.key);
+        // Live library update: the title's downloaded count changed.
+        emitLibraryLive({ type: 'counts-changed', mangaKey: job.mangaKey });
       } catch (error) {
         const latest = await db.get('downloadQueue', job.key) as DownloadJobRecord | undefined;
         if (latest) {
@@ -181,6 +176,7 @@ async function pump(): Promise<void> {
 
 export async function enqueueChapters(mangaKey: string, chapterIds: string[]): Promise<number> {
   await initDownloadQueue();
+  if (await isMangaDownloadRemoved(mangaKey)) return 0;
   const db = await getDB();
   const [sourceId, mangaId] = splitMangaKey(mangaKey);
   const [manga, metas] = await Promise.all([getManga(mangaKey), getChapterMetas(mangaKey)]);
@@ -264,6 +260,8 @@ export async function clearDownloadQueue(): Promise<void> {
   const wasPaused = !!(await db.get('metadata', 'downloads:paused'))?.value;
   try {
     await setDownloadsPaused(true);
+    if (retryTimer !== undefined) clearTimeout(retryTimer);
+    retryTimer = undefined;
     const jobs = await getDownloadJobs();
     if (!jobs.length) { await refresh(); return; }
     // Abort the in-flight download without awaiting it: waiting on its

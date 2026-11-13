@@ -127,6 +127,25 @@ export async function applyLibraryLiveUpdate(snapshot: LibraryData, update: Libr
       const items = snapshot.items.map(i => i === item ? nextItem : i);
       return { ...snapshot, items, history, resume: findResume(items, snapshot.state, snapshot.downloaded, history) };
     }
+    case 'counts-changed': {
+      const item = snapshot.items.find(i => i.entry.key === update.mangaKey);
+      if (!item) return snapshot;
+      const loaded = await loadLibraryItem(update.mangaKey);
+      if (!loaded) return snapshot;
+      // Replace this title's rows, including stale state and downloads.
+      for (const [key, s] of snapshot.state) {
+        if (s.mangaKey === update.mangaKey) snapshot.state.delete(key);
+      }
+      for (const s of loaded.states) snapshot.state.set(s.key, s);
+      for (const c of item.chapters) snapshot.downloaded.delete(c.key);
+      for (const c of loaded.item.chapters) snapshot.downloaded.delete(c.key);
+      for (const d of loaded.downloads) snapshot.downloaded.add(d.key);
+      // The targeted loader boosts newly added titles; a counts refresh
+      // must preserve the existing session Last-read position instead.
+      const nextItem = { ...loaded.item, sort: { ...loaded.item.sort, read: item.sort.read } };
+      const items = snapshot.items.map(i => i === item ? nextItem : i);
+      return { ...snapshot, items, resume: findResume(items, snapshot.state, snapshot.downloaded, snapshot.history) };
+    }
     case 'library-added': {
       if (snapshot.items.some(i => i.entry.key === update.mangaKey)) return snapshot;
       const loaded = await loadLibraryItem(update.mangaKey);

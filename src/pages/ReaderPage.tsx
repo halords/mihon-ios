@@ -29,7 +29,7 @@ export async function loadReaderPages(mangaKey: string, chapterId: string, signa
   if (!pages.length) throw new Error('The source returned no pages for this chapter');
   return pages;
 }
-function PageImage({ page, index, eager, paged, fit, onLoad }: { page: MangaPage; index: number; eager?: boolean; paged?: boolean; fit?: 'width' | 'screen'; onLoad: () => void }) {
+function PageImage({ page, index, eager, paged, fit, onLoad, onFail }: { page: MangaPage; index: number; eager?: boolean; paged?: boolean; fit?: 'width' | 'screen'; onLoad: () => void; onFail?: () => void }) {
   const [failed, setFailed] = useState(false);
   const [attempt, setAttempt] = useState(0);
   const needsDecode = page.imageUrl.includes('#tiles=');
@@ -72,7 +72,7 @@ function PageImage({ page, index, eager, paged, fit, onLoad }: { page: MangaPage
         } else blob = await fetchImage(page.imageUrl, controller.signal);
         if (!alive || token !== request) return;
         objectUrl = URL.createObjectURL(blob); setSrc(objectUrl);
-      } catch { if (alive && token === request) setFailed(true); }
+      } catch { if (alive && token === request) { setFailed(true); onFail?.(); } }
     }
     // Decoded images and blob URLs are held only near the visible pages.
     const observer = new IntersectionObserver(entries => { void activate(paged || entries.some(e => e.isIntersecting) || !!eager && !page.width); }, { root: element.current?.closest('.reader-screen'), rootMargin: '1000px 0px' });
@@ -83,7 +83,7 @@ function PageImage({ page, index, eager, paged, fit, onLoad }: { page: MangaPage
   const showImage = !!src && (blobManaged || near || !!eager);
   return <div ref={element} className={`reader-page ${paged ? `paged-page fit-${fit}` : ''}`} data-page={index} style={!paged ? { aspectRatio: `${size.width} / ${size.height}` } : undefined}>
     {failed ? <div className="page-error"><Icon name="cloud" size={30} /><p>Page {index + 1} could not load</p><button className="btn" onClick={event => { event.stopPropagation(); setFailed(false); setAttempt(a => a + 1); }}>Retry page</button></div> :
-      showImage ? <img key={attempt} src={src} alt={`Page ${index + 1}`} width={size.width} height={size.height} loading={eager || paged ? 'eager' : 'lazy'} decoding="async" referrerPolicy="no-referrer" draggable={false} onLoad={event => { const img = event.currentTarget; setSize({ width: img.naturalWidth, height: img.naturalHeight }); requestAnimationFrame(onLoad); }} onError={() => setFailed(true)} /> : <div className="page-placeholder" aria-label={`Loading page ${index + 1}`} />}
+      showImage ? <img key={attempt} src={src} alt={`Page ${index + 1}`} width={size.width} height={size.height} loading={eager || paged ? 'eager' : 'lazy'} decoding="async" referrerPolicy="no-referrer" draggable={false} onLoad={event => { const img = event.currentTarget; setSize({ width: img.naturalWidth, height: img.naturalHeight }); requestAnimationFrame(onLoad); }} onError={() => { setFailed(true); onFail?.(); }} /> : <div className="page-placeholder" aria-label={`Loading page ${index + 1}`} />}
   </div>;
 }
 
@@ -259,7 +259,8 @@ export default function ReaderPage({ mangaKey, chapterId }: { mangaKey: string; 
       }
       const last = pages[pages.length - 1];
       const image = last?.querySelector('img');
-      complete = !!image?.complete && image.naturalWidth > 0 && (last?.getBoundingClientRect().bottom ?? Infinity) <= viewport.bottom + 12;
+      const failed = !!last?.querySelector('.page-error');
+      complete = ((!!image?.complete && image.naturalWidth > 0) || failed) && (last?.getBoundingClientRect().bottom ?? Infinity) <= viewport.bottom + 12;
       if (complete) visiblePage = Math.max(0, pages.length - 1);
       break;
     }
@@ -376,12 +377,12 @@ export default function ReaderPage({ mangaKey, chapterId }: { mangaKey: string; 
     </div>
     {mode === 'vertical' ? <div className="reader-strip" ref={strip}>{segments.map((segment, index) => <section key={segment.key} data-segment={index} className="reader-segment">
       {index > 0 && <div className="chapter-divider">{segment.chapter.name}</div>}
-      {segment.pages.map((asset, p) => <PageImage key={`${segment.key}:${p}`} page={asset} index={p} eager={index === 0 && p <= Math.max(2, resumeTarget.current.page)} onLoad={imageLoaded} />)}
+      {segment.pages.map((asset, p) => <PageImage key={`${segment.key}:${p}`} page={asset} index={p} eager={index === 0 && (p <= 2 || Math.abs(p - resumeTarget.current.page) <= 2)} onLoad={imageLoaded} onFail={imageLoaded} />)}
     </section>)}<div ref={sentinel} className="reader-sentinel" />{appending && <div className="reader-bottom-note">Loading next chapter…</div>}{appendError && <div className="reader-bottom-note"><p>{appendError}</p><button className="btn" onClick={() => { setAppendError(''); void appendNext(); }}>Retry next chapter</button></div>}
       {!next && <div className="reader-end"><Icon name="check" size={36} /><h2>You’re caught up</h2><p>You’ve reached the latest saved chapter.</p><button className="btn" onClick={() => nav.openManga(mangaKey)}>Back to title</button></div>}
       {!settings.continuousReading && next && <div className="reader-end"><button className="btn" onClick={() => { flush(true); nav.openReader(mangaKey, next.id); }}>Next chapter <Icon name="arrow" /></button></div>}
     </div> : atEnd ? <div className="reader-end reader-end-full"><Icon name="check" size={40} /><h2>Chapter complete</h2><p>{active.chapter.name}</p>{next && <button className="btn" onClick={() => nav.openReader(mangaKey, next.id)}>Next chapter <Icon name="arrow" /></button>}<button className="text-btn" onClick={() => setAtEnd(false)}>Return to last page</button><button className="text-btn" onClick={() => nav.openManga(mangaKey)}>Back to title</button></div> : <>
-      <div className="paged-stage" onDoubleClick={() => setZoom(v => !v)}><PageImage key={`${active.key}:${page}`} page={active.pages[page]!} index={page} eager paged fit={settings.readerFit} onLoad={imageLoaded} /></div>
+      <div className="paged-stage" onDoubleClick={() => setZoom(v => !v)}><PageImage key={`${active.key}:${page}`} page={active.pages[page]!} index={page} eager paged fit={settings.readerFit} onLoad={imageLoaded} onFail={imageLoaded} /></div>
       {!zoom && <div className="reader-tap-zones" onPointerDown={e => swipe.current = { x: e.clientX, y: e.clientY }} onPointerUp={e => {
         if (!swipe.current) return;
         const dx = e.clientX - swipe.current.x; const dy = e.clientY - swipe.current.y; swipe.current = null;

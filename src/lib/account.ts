@@ -266,6 +266,30 @@ async function scanSyncRecords(db: Awaited<ReturnType<typeof getRawDB>>, visit: 
   while (cursor) { visit(cursor.value); cursor = await cursor.continue(); }
 }
 
+// Collects ONE push batch from the by-pending index: up to 4,000 valid
+// records or 3.5 MB of serialized JSON, whichever comes first. Each scan
+// starts at the beginning of the index, but records acked by earlier
+// batches have pending 0, so they are gone from the index and the scan
+// resumes where the last batch left off. Invalid records stay pending
+// until the quarantine write after the loop, so they are re-encountered
+// on every scan — the caller dedupes them by id.
+async function collectPushBatch(db: Awaited<ReturnType<typeof getRawDB>>, encoder: TextEncoder): Promise<{ batch: SyncRecord[]; invalid: SyncRecord[]; exhausted: boolean }> {
+  const batch: SyncRecord[] = []; const invalid: SyncRecord[] = [];
+  let bytes = 16; // {"changes":[]} envelope
+  let exhausted = true;
+  let cursor = await db.transaction('syncRecords').objectStore('syncRecords').index('by-pending').openCursor(IDBKeyRange.only(1));
+  while (cursor) {
+    const record = cursor.value as SyncRecord;
+    if (!validChange(record)) { invalid.push(record); cursor = await cursor.continue(); continue; }
+    const size = encoder.encode(JSON.stringify(record)).length + 1;
+    if (batch.length && bytes + size > 3.5 * 1024 * 1024) { exhausted = false; break; }
+    batch.push(record); bytes += size;
+    if (batch.length >= 4000) { exhausted = false; break; }
+    cursor = await cursor.continue();
+  }
+  return { batch, invalid, exhausted };
+}
+
 async function summary(): Promise<void> {
   const db = await getRawDB();
   let pending = 0;
@@ -292,8 +316,6 @@ async function cycle(): Promise<void> {
   try {
     const db = await getRawDB();
     if ((await db.get('syncControl', 'owner'))?.value !== accountId) throw new SessionError('The active account changed.');
-    const pending: SyncRecord[] = [];
-    await scanSyncRecords(db, record => { if (record.pending) pending.push(record); });
     // Batches are sized by exact serialized bytes (SYNC-REVISION-SPEC.md):
     // up to 4,000 records or 3.5 MB per request, whichever comes first —
     // under the server's 4 MB cap, which is under Vercel's 4.5 MB limit.
@@ -301,24 +323,20 @@ async function cycle(): Promise<void> {
     // pending count, then the next batch.
     const encoder = new TextEncoder();
     const quarantined: SyncRecord[] = [];
-    for (let start = 0; start < pending.length;) {
+    const quarantinedIds = new Set<string>();
+    for (;;) {
       if (generation !== currentGeneration) return;
-      const batch: SyncRecord[] = []; let bytes = 16; // {"changes":[]} envelope
-      while (start < pending.length && batch.length < 4000) {
-        const record = pending[start]!;
-        if (!validChange(record)) {
-          quarantined.push(record); start++;
-          continue;
-        }
-        const size = encoder.encode(JSON.stringify(record)).length + 1;
-        if (batch.length && bytes + size > 3.5 * 1024 * 1024) break;
-        batch.push(record); bytes += size; start++;
+      const { batch, invalid, exhausted } = await collectPushBatch(db, encoder);
+      for (const record of invalid) {
+        if (quarantinedIds.has(record.id)) continue;
+        quarantinedIds.add(record.id); quarantined.push(record);
       }
-      if (!batch.length) continue;
+      if (!batch.length) break;
       await request('push', { changes: batch }, accountId, 120000);
       if (generation !== currentGeneration) return;
       await acknowledgeChanges(batch, accountId);
       await summary();
+      if (exhausted) break;
     }
     if (quarantined.length) {
       // One oversized/corrupt local record must not wedge all of sync:

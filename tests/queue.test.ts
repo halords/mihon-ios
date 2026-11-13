@@ -1,6 +1,7 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { AUTO_RETRY_DELAYS_MS, clearDownloadQueue, enqueueChapters, retryDownload, setDownloadsPaused, type DownloadJobRecord } from '../src/lib/downloadQueue';
-import { getAllDownloads, getDB, getDownloadJobs, putManga, putChapterMetas } from '../src/lib/db';
+import { addToLibrary, downloadRemovalKey, getAllDownloads, getDB, getDownloadJobs, putManga, putChapterMetas } from '../src/lib/db';
+import { getLibrarySnapshot, loadLibrary, setLibrarySnapshot } from '../src/lib/libraryData';
 import { registerSource, unregisterSource } from '../src/sources';
 import { testSource } from './fixtures/source';
 import { svgPage } from './fixtures/mihon';
@@ -74,8 +75,8 @@ it('auto-retries rate-limited chapters after a long cooldown, exhausts after two
   await enqueueChapters(key, ['/chapter/1']);
   await setDownloadsPaused(false);
   // The first failure re-queues instead of failing, with one retry used
-  // and the ~60s rate-limit cooldown recorded. The pump parks in its
-  // cooldown wait, so this state is stable to observe.
+  // and the ~60s rate-limit cooldown recorded. The pump parks (exits;
+  // a timer is scheduled for the cooldown), so this state is stable to observe.
   await vi.waitFor(async () => {
     const job = (await getDownloadJobs())[0] as DownloadJobRecord | undefined;
     expect(job?.status).toBe('queued');
@@ -86,8 +87,9 @@ it('auto-retries rate-limited chapters after a long cooldown, exhausts after two
   try {
     const job = (await getDownloadJobs())[0]!;
     await (await getDB()).put('downloadQueue', { ...job, notBefore: Date.now() - 1 });
-    // The waiting pump re-reads due times every tick, so the edited
-    // notBefore is picked up without any pause/unpause or manual retry.
+    // The pump no longer polls, so the edited notBefore needs a queue event
+    // to be noticed — the no-op unpause below refreshes and pumps.
+    await setDownloadsPaused(false);
     await vi.waitFor(async () => {
       const current = (await getDownloadJobs())[0];
       expect(current?.status).toBe('failed');
@@ -117,6 +119,40 @@ it('schedules an ordinary transient failure for an automatic retry about five se
   await setDownloadsPaused(true);
 });
 
+it('schedules a JSON API rate-limit failure for an automatic retry more than thirty seconds out', async () => {
+  const f = await setup();
+  f.source.getPageList = async () => { throw new Error('Source rate limit reached. Try again shortly.'); };
+  vi.stubGlobal('fetch', vi.fn(async () => new Response(svgPage('Page'), { headers: { 'Content-Type': 'image/svg+xml' } })));
+  await enqueueChapters(key, ['/chapter/1']);
+  await setDownloadsPaused(false);
+  await vi.waitFor(async () => {
+    const job = (await getDownloadJobs())[0] as DownloadJobRecord | undefined;
+    expect(job?.status).toBe('queued');
+    expect(job?.attempts).toBe(1);
+    expect(job?.notBefore).toBeGreaterThan(Date.now() + 30000);
+  });
+  await setDownloadsPaused(true);
+});
+
+it('automatically pumps a transient retry when its cooldown expires without another queue event', async () => {
+  const restore = shortenDelays([20, 40], [20, 40]);
+  try {
+    const f = await setup();
+    let calls = 0;
+    f.source.getPageList = async () => {
+      calls++;
+      if (calls === 1) throw new Error('The source did not return a valid image');
+      return [{ imageUrl: 'https://pages.example/ok.svg' }];
+    };
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(svgPage('Page'), { headers: { 'Content-Type': 'image/svg+xml' } })));
+    await enqueueChapters(key, ['/chapter/1']);
+    await setDownloadsPaused(false);
+    await vi.waitFor(async () => expect(await getAllDownloads()).toHaveLength(1));
+    await vi.waitFor(async () => expect(await getDownloadJobs()).toHaveLength(0));
+    expect(calls).toBe(2);
+  } finally { restore(); }
+});
+
 it('fails non-transient errors immediately with no automatic retry', async () => {
   const f = await setup();
   let calls = 0;
@@ -133,6 +169,22 @@ it('fails non-transient errors immediately with no automatic retry', async () =>
   expect(calls).toBe(1);
 });
 
+it('fails a removed-title start error immediately with no automatic retry', async () => {
+  const f = await setup();
+  const message = 'Add this title back to your library before downloading.';
+  f.source.getPageList = vi.fn(async () => { throw new Error(message); });
+  vi.stubGlobal('fetch', vi.fn(async () => new Response(svgPage('Page'), { headers: { 'Content-Type': 'image/svg+xml' } })));
+  await enqueueChapters(key, ['/chapter/1']);
+  await setDownloadsPaused(false);
+  await vi.waitFor(async () => {
+    const job = (await getDownloadJobs())[0] as DownloadJobRecord | undefined;
+    expect(job?.status).toBe('failed');
+    expect(job?.attempts).toBeUndefined();
+    expect(job?.error).toContain(message);
+  });
+  expect(f.source.getPageList).toHaveBeenCalledTimes(1);
+});
+
 it('downloads chapters oldest first regardless of enqueue order', async () => {
   const f = testSource('queue-source', 3);
   const order: string[] = [];
@@ -144,4 +196,34 @@ it('downloads chapters oldest first regardless of enqueue order', async () => {
   await setDownloadsPaused(false);
   await vi.waitFor(async () => expect(await getDownloadJobs()).toHaveLength(0));
   expect(order).toEqual(['/chapter/1', '/chapter/2', '/chapter/3']);
+});
+
+it('does not enqueue chapters for a title with a download removal marker', async () => {
+  await setup();
+  await (await getDB()).put('metadata', { key: downloadRemovalKey(key), value: { pending: true } });
+  try {
+    expect(await enqueueChapters(key, ['/chapter/1'])).toBe(0);
+    expect(await getDownloadJobs()).toHaveLength(0);
+  } finally {
+    await (await getDB()).delete('metadata', downloadRemovalKey(key));
+  }
+});
+
+it('a completed download patches the Library snapshot counts', async () => {
+  await setup();
+  await addToLibrary(key, ['Default']);
+  const snapshot = await loadLibrary();
+  setLibrarySnapshot(snapshot);
+  expect(snapshot.items.find(i => i.entry.key === key)?.downloaded).toBe(0);
+  vi.stubGlobal('fetch', vi.fn(async () => new Response(svgPage('Page'), { headers: { 'Content-Type': 'image/svg+xml' } })));
+  await enqueueChapters(key, ['/chapter/1']);
+  await setDownloadsPaused(false);
+  await vi.waitFor(async () => expect(await getAllDownloads()).toHaveLength(1));
+  // The queue emits counts-changed on completion; the module-scope live
+  // subscription patches the snapshot without a reload.
+  await vi.waitFor(async () => {
+    const patched = getLibrarySnapshot();
+    expect(patched).not.toBe(snapshot);
+    expect(patched?.items.find(i => i.entry.key === key)?.downloaded).toBe(1);
+  });
 });
