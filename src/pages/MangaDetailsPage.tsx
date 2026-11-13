@@ -14,6 +14,7 @@ import Cover from '../components/Cover';
 import Icon from '../components/Icon';
 import SourceLogo from '../components/SourceLogo';
 import Sheet from '../components/Sheet';
+import FastScroller from '../components/FastScroller';
 import { EmptyState, toast } from '../components/Feedback';
 import type { ParsedTracking } from '../backup/models';
 
@@ -167,5 +168,6 @@ export default function MangaDetailsPage({ mangaKey }: { mangaKey: string }) {
       <button className="sheet-option" disabled={busy || !sourceAvailable} onClick={() => void run(async () => { const count = await enqueueChapters(mangaKey, actionKeys); toast(`${count} chapters queued`); })}><Icon name="download" />Download</button>
       <button className="sheet-option danger" disabled={busy} onClick={() => { if (window.confirm('Delete the downloaded pages for these chapters?')) void run(async () => { for (const id of actionKeys) await deleteChapterDownload(mangaKey, chapterKey(sourceId, mangaId, id)); }); }}><Icon name="trash" />Delete download</button>
     </Sheet>}
+    <FastScroller bottomOffset="calc(env(safe-area-inset-bottom, 0px) + 88px)" hidden={sheet !== null} />
   </main>;
 }

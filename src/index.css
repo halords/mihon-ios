@@ -456,3 +456,11 @@ textarea { width:100%; min-height:120px; resize:vertical; }
   *,*::before,*::after { scroll-behavior:auto !important; transition:none !important; }
   .spinner { animation-duration:2s; }
 }
+
+/* Fast scroller (Library + chapter list) */
+.fast-scroller { position:fixed; z-index:8; right:max(2px,env(safe-area-inset-right,0px)); top:calc(72px + env(safe-area-inset-top,0px) + 8px); bottom:var(--fast-scroller-bottom,calc(var(--tabbar-h) + env(safe-area-inset-bottom,0px) + 12px)); width:24px; pointer-events:none; opacity:1; transition:opacity .2s; }
+.fast-scroller.is-hidden { opacity:0; visibility:hidden; }
+.fast-scroller-hit { position:absolute; left:0; top:0; width:24px; min-height:40px; pointer-events:auto; touch-action:none; cursor:grab; display:flex; justify-content:center; user-select:none; -webkit-user-select:none; }
+.fast-scroller:active .fast-scroller-hit,.fast-scroller-hit:active { cursor:grabbing; }
+.fast-scroller-thumb { width:4px; height:100%; border-radius:4px; background:color-mix(in srgb,var(--accent) 45%,transparent); opacity:.6; transition:width .18s ease,background-color .18s ease,opacity .18s ease; }
+.fast-scroller.is-expanded .fast-scroller-thumb { width:8px; background:var(--accent); opacity:1; }

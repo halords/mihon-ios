@@ -13,6 +13,7 @@ import { getSource } from '../sources';
 import { enqueueChapters } from '../lib/downloadQueue';
 import { compareLibraryItems, LIBRARY_SORT_OPTIONS } from '../lib/librarySort';
 import LibrarySortControls from '../components/LibrarySortControls';
+import FastScroller from '../components/FastScroller';
 
 // The library view reads the session snapshot from ../lib/libraryData
 // (assembled once per app load; patched live by the user's own actions —
@@ -128,5 +129,6 @@ export default function LibraryPage() {
       {(data?.categories ?? []).map(c => <label key={c.id} className="form-row"><span>{c.name}</span><input type="checkbox" checked={categorySelection.includes(c.name)} onChange={e => setCategorySelection(old => e.target.checked ? [...old, c.name] : old.filter(n => n !== c.name))} /></label>)}
       <button className="btn wide" disabled={busy} onClick={() => void run(async () => { for (const key of selected) await setLibraryCategory(key, categorySelection); })}>Apply to {selected.size} titles</button>
     </Sheet>}
+    {!loading && data && <FastScroller hidden={sheet !== null} />}
   </main>;
 }
