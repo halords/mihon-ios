@@ -425,7 +425,7 @@ textarea { width:100%; min-height:120px; resize:vertical; }
 .reader-tap-zones { position:fixed; inset:0; z-index:101; display:grid; grid-template-columns:32% 36% 32%; pointer-events:none; }
 .reader-tap-zones>button { border:0; border-radius:0; padding:0; background:transparent; pointer-events:auto; touch-action:pan-y pinch-zoom; }
 .reader-zoomed { overflow:auto; touch-action:pan-x pan-y pinch-zoom; }
-.reader-zoomed .paged-stage { width:180%; }
+.reader-zoomed .paged-stage { width:200%; }
 .reader-zoomed .paged-page>img { height:auto; max-height:none; object-fit:contain; align-self:flex-start; }
 .page-error { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:15px; min-height:420px; padding:24px; color:#c9c2d3; font-size:13px; }
 .reader-screen .sheet { --bg:#141318; --surface:#1e1c24; --surface2:#2b2733; --border:#39343f; --text:#eee9f3; --dim:#aaa4b4; --accent:#c8b5f6; --accent-text:#302343; }

@@ -254,23 +254,6 @@ export async function deleteMangaDownloads(mangaKey: string): Promise<void> {
   dispatchDataEvent('mihon:downloads-changed');
 }
 
-export async function getCachedChapterPages(key: string): Promise<string[] | null> {
-  const download = await getDownload(key);
-  if (!download || typeof caches === 'undefined') return null;
-  const cache = await caches.open(PAGES_CACHE);
-  const urls: string[] = [];
-  try {
-    for (let i = 0; i < download.pageCount; i++) {
-      const response = await cache.match(pageCacheKey(download.cacheKey ?? key, i));
-      if (!response) { revokeBlobUrls(urls); return null; }
-      const blob = await response.blob();
-      if (!blob.size) { revokeBlobUrls(urls); return null; }
-      urls.push(URL.createObjectURL(blob));
-    }
-    return urls.length ? urls : null;
-  } catch (error) { revokeBlobUrls(urls); throw error; }
-}
-
 export async function getCachedPageList(key: string): Promise<MangaPage[] | null> {
   const download = await getDownload(key);
   if (!download || !await isChapterCached(key, download.pageCount, download.cacheKey)) return null;
@@ -280,10 +263,6 @@ export async function getCachedPageList(key: string): Promise<MangaPage[] | null
   }));
 }
 
-export async function resolveChapterPages(key: string, fallbackUrls: string[]): Promise<string[]> {
-  const cached = await getCachedChapterPages(key);
-  return cached ?? fallbackUrls;
-}
 export function revokeBlobUrls(urls: string[]): void {
   for (const url of urls) if (url.startsWith('blob:')) URL.revokeObjectURL(url);
 }

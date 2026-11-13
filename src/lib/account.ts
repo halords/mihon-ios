@@ -375,10 +375,13 @@ async function cycle(): Promise<void> {
     publish({ status: navigator.onLine ? 'error' : 'offline', error: error instanceof Error ? error.message : 'Unable to sync. Changes are saved on this device.' });
   }
 }
-export async function addDeviceLibrary(): Promise<void> {
+// Returns true when a guest snapshot was merged (and the post-merge sync
+// ran); false when there was nothing to adopt, so callers know whether a
+// sync cycle has already run (nit 14: sign-in used to run up to 3 cycles).
+export async function addDeviceLibrary(): Promise<boolean> {
   if (!state.user || !sessionVerified) throw new Error('Sign in before adding your device library.');
   const db = await getRawDB(); const guest = await readProfileSnapshot(db.transaction('syncProfiles').objectStore('syncProfiles') as unknown as ProfileStoreHandle, 'guest');
-  if (!guest) return;
+  if (!guest) return false;
   const data: BackupData = { version: 2, exportedAt: Date.now(), manga: [], chapterMeta: [], chapterState: [], library: [], history: [], downloads: [], categories: [] };
   for (const store of ['manga', 'chapterMeta', 'chapterState', 'library', 'history', 'categories', 'downloads'] as const) (data[store] as unknown[]) = guest.stores[store] ?? [];
   await importData(data);
@@ -404,6 +407,7 @@ export async function addDeviceLibrary(): Promise<void> {
   // The profile-switch reload may precede this merge; reload again after adoption.
   emitLibraryLive({ type: 'library-invalidated' });
   await summary(); await syncAccount();
+  return true;
 }
 async function connect(user: AccountUser): Promise<void> {
   generation++; sessionVerified = false;
@@ -436,23 +440,25 @@ export async function signInAccount(email: string, password: string): Promise<vo
   // backup as a guest and THEN signing in to an established account left
   // the imported library stranded in its snapshot, visible again only
   // behind the manual "Add device library" button, which read as the
-  // import being wiped. addDeviceLibrary no-ops when no snapshot exists.
-  await addDeviceLibrary();
-  await syncAccount();
+  // import being wiped. Adoption syncs at the end when it merged, so a
+  // trailing sync runs only when no cycle has run yet at all.
+  const merged = await addDeviceLibrary();
+  if (!merged && !result.hasSyncedData) await syncAccount();
 }
 export async function createAccount(email: string, password: string): Promise<void> {
   const result = await request('register', { email, password });
   await connect(result.user); publish({ recoveryCode: result.recoveryCode });
-  await addDeviceLibrary(); await syncAccount();
+  if (!await addDeviceLibrary()) await syncAccount();
 }
 export async function recoverAccount(email: string, recoveryCode: string, password: string): Promise<void> {
   const result = await request('recover', { email, recoveryCode, password });
   await connect(result.user); publish({ recoveryCode: result.recoveryCode });
   // Same adoption rule as sign-in: pull first, then merge any device
-  // library that was in use before recovering the account.
+  // library that was in use before recovering the account. The pull
+  // already synced, and adoption syncs again when it merged — no
+  // trailing cycle needed.
   await syncAccount();
   await addDeviceLibrary();
-  await syncAccount();
 }
 export async function signOutAccount(): Promise<void> {
   if (!navigator.onLine) throw new Error('Connect to the internet to sign out securely.');

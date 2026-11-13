@@ -73,7 +73,10 @@ export async function inspectTachibkFile(file: Blob): Promise<TachibkPreview> {
   // bogus "0 bytes" error before a single byte was read.
   const raw = new Uint8Array(await file.arrayBuffer());
   if (!raw.length) throw new Error('This backup is empty (0 bytes). Choose the original .tachibk file.');
-  if (raw.length > 128 * 1024 * 1024) throw new Error('This backup exceeds the 128 MB file limit');
+  // Cap under Chrome's ~127 MB single-value limit: the retained original
+  // archive is stored as one IndexedDB value, and a file between the cap
+  // and the limit would restore fully and then fail at the archive put.
+  if (raw.length > 120 * 1024 * 1024) throw new Error('This backup exceeds the 120 MB file limit');
   const digest = await crypto.subtle.digest('SHA-256', blobPart(raw));
   const archiveId = [...new Uint8Array(digest)].map(v => v.toString(16).padStart(2, '0')).join('');
   const backup = await parseInWorker(raw);
@@ -169,8 +172,16 @@ export async function restoreTachibk(preview: TachibkPreview, options: RestoreOp
         coverUrl: pm.thumbnailUrl || coverArt(title, pm.author, [...pm.url].reduce((n, c) => n + c.charCodeAt(0), 0) % 360),
       };
       const previous = await tx.objectStore('manga').get(key);
+      // Keep fresher local metadata: the backup file's last-modified time
+      // is when it was exported, so a local copy refreshed from the source
+      // after that export keeps its title/author/description. Unknown file
+      // time (0) falls back to the backup, as before. The `mihon` raw
+      // payload below still overwrites — it IS backup data by definition.
+      const backupTime = 'lastModified' in preview.file && typeof preview.file.lastModified === 'number' ? preview.file.lastModified : 0;
+      const keepLocal = !!previous && backupTime > 0 && previous.updatedAt > backupTime;
+      const kept = keepLocal && previous ? { manga: previous.manga, updatedAt: previous.updatedAt } : { manga, updatedAt: Date.now() };
       await tx.objectStore('manga').put({
-        ...previous, key, manga, sourceAvailable: available, updatedAt: Date.now(),
+        ...previous, key, ...kept, sourceAvailable: available,
         readerMode: previous?.readerMode ?? readerModeFromFlags(pm.viewerFlags ?? pm.viewer),
         notes: previous?.notes ?? pm.notes,
         mihon: jsonSafe({ ...pm, chapters: undefined, history: undefined, sourceName }),

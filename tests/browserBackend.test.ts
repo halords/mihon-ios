@@ -28,7 +28,12 @@ it('keeps a user-operated browser session for source APIs, cross-origin images, 
       return visitor;
     }
   }
-  const sessions = new FixtureSessions({ stateDir, idleMs: 60000, launch: async (options: Parameters<typeof chromium.launch>[0]) => { launches.push(options); return chromium.launch(options); } });
+  // The test verifies session/proxy behavior, not Chromium sandboxing — and
+  // the sandbox cannot initialize in containers/CI (launch dies with
+  // "Chromium sandboxing failed!"), which was the whole failure. Override
+  // the sandbox flag in the injected launch only; production still launches
+  // sandboxed on Linux (sessions.mjs). The recorded options stay untouched.
+  const sessions = new FixtureSessions({ stateDir, idleMs: 60000, launch: async (options: Parameters<typeof chromium.launch>[0]) => { launches.push(options); return chromium.launch({ ...options, chromiumSandbox: false }); } });
   const service = createBrowserService({ token: 'test-browser-secret-'.repeat(3), sessions });
   await new Promise<void>(resolve => service.server.listen(0, '127.0.0.1', resolve));
   const backend = `http://127.0.0.1:${(service.server.address() as { port: number }).port}`;

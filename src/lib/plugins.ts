@@ -14,6 +14,8 @@ import { fetchJson, fetchWithTimeout, proxiedUrl } from './fetchJson';
 // self-contained ES module (no imports) that exports `source` (or a default
 // export) implementing the Source interface. Modules are TRUSTED code: they
 // execute with the app's privileges. Only install indexes you control.
+// That includes same-origin requests: a module can call /api/account with
+// the session cookie the browser sends automatically. There is no sandbox.
 // Full contract for module authors: PLUGIN.md in the repo root.
 
 export interface ExtensionManifest {

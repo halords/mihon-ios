@@ -1,5 +1,4 @@
 import { fetchWithTimeout } from '../lib/fetchJson';
-import { browserSourceEnabled } from '../lib/browserSources';
 import { getChapterMetas, getManga } from '../lib/db';
 import { allowedSourceUrl, type BackupSourceConfig } from './backupSources';
 import { mangaKey, type MangaPage, type MangaStatus, type SChapter, type SManga } from './Source';
@@ -7,7 +6,7 @@ import { mangaKey, type MangaPage, type MangaStatus, type SChapter, type SManga 
 export function sourceProxyUrl(config: BackupSourceConfig, input: string, image = false): string {
   const url = new URL(input, config.baseUrl);
   if (!allowedSourceUrl(config, url, image)) throw new Error(`${config.name} returned an unsupported ${image ? 'image' : 'website'} host: ${url.hostname}`);
-  return `/api/source?${new URLSearchParams({ source: config.id, url: url.href, ...(image ? { image: '1' } : {}), ...(browserSourceEnabled(config.id) ? { browser: '1' } : {}) })}`;
+  return `/api/source?${new URLSearchParams({ source: config.id, url: url.href, ...(image ? { image: '1' } : {}) })}`;
 }
 
 export class SourceRequestError extends Error {
@@ -35,7 +34,7 @@ export async function sourceJson<T>(config: BackupSourceConfig, url: string, ini
 
 const documents = new Map<string, { at: number; pending: Promise<Document> }>();
 export function sourceDocument(config: BackupSourceConfig, url: string, init?: RequestInit): Promise<Document> {
-  const key = config.id + ':' + (browserSourceEnabled(config.id) ? 'browser:' : 'http:') + url;
+  const key = config.id + ':' + url;
   const hit = documents.get(key);
   if (!init?.signal && !init?.method && hit && Date.now() - hit.at < 30000) return hit.pending;
   const pending = (async () => {

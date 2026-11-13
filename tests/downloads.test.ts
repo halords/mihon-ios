@@ -1,7 +1,7 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { registerSource, unregisterSource } from '../src/sources';
 import { putManga, putChapterMetas, getDB, getChapterState } from '../src/lib/db';
-import { commitDownload, downloadChapter, getCachedPageList, getCachedChapterPages, pageCacheKey, PAGES_CACHE, reconcileDownloads, deleteChapterDownload } from '../src/lib/downloads';
+import { commitDownload, downloadChapter, getCachedPageList, pageCacheKey, PAGES_CACHE, reconcileDownloads, deleteChapterDownload } from '../src/lib/downloads';
 import { fetchImage, cdnUrl, proxiedUrl } from '../src/lib/fetchJson';
 import { saveSettings } from '../src/lib/settings';
 import { testSource } from './fixtures/source';
@@ -37,9 +37,8 @@ it('reads a downloaded chapter without a source and detects missing cached pages
   await downloadChapter(key, chapterKey, 'test-source', '/hero', '/chapter/1');
   unregisterSource('test-source');
   (navigator as { onLine: boolean }).onLine = false;
-  const pages = await getCachedChapterPages(chapterKey);
+  const pages = await getCachedPageList(chapterKey);
   expect(pages).toHaveLength(3);
-  pages!.forEach(url => URL.revokeObjectURL(url));
   await (await caches.open(PAGES_CACHE)).delete(pageCacheKey(chapterKey, 1));
   expect(await getCachedPageList(chapterKey)).toBeNull();
   expect(await reconcileDownloads()).toBe(1);

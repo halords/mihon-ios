@@ -8,7 +8,6 @@ import { getSource } from '../sources';
 import { formatBytes } from '../lib/files';
 import Icon from '../components/Icon';
 import SourceLogo from '../components/SourceLogo';
-import BrowserSourcesPanel from '../components/BrowserSourcesPanel';
 
 export default function ConnectionsPage() {
   const nav = useNav();
@@ -39,8 +38,7 @@ export default function ConnectionsPage() {
     finally { setBusy(false); }
   }
   return <main className="screen settings-screen"><header className="topbar"><button className="icon-btn" aria-label="Back" onClick={nav.back}><Icon name="back" /></button><h1>Connections</h1></header>
-    <div className="page-intro"><h2>Your sources, on iOS.</h2><p>Your backup sources are built in. Use browser verification for websites that require a browser session, or connect Suwayomi for Android extensions.</p></div>
-    <BrowserSourcesPanel />
+    <div className="page-intro"><h2>Your sources, on iOS.</h2><p>Your backup sources are built in. Connect Suwayomi for Android extensions.</p></div>
     {error && <div className="error" role="alert">{error}</div>}{message && <p className="status-message" role="status">{message}</p>}
     <section className="settings-card"><div className="card-heading"><Icon name="cloud" /><h3>Suwayomi server</h3><span className={`chip ${connection.status === 'connected' ? 'success-chip' : ''}`}>{connection.status === 'connected' ? 'Connected' : connection.status === 'connecting' ? 'Connecting' : connection.status === 'offline' ? 'Offline' : 'Disconnected'}</span></div>
       <label className="field-label">Server URL<input type="url" aria-label="Suwayomi server URL" autoCapitalize="none" autoCorrect="off" placeholder="https://suwayomi.example.com" value={url} onChange={e => setUrl(e.target.value)} /></label>

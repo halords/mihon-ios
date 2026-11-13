@@ -1,7 +1,6 @@
 import { loadSettings } from './settings';
 import { validateImageBlob } from './images';
 import { backupSourceConfigs, allowedSourceUrl } from '../sources/backupSources';
-import { browserSourceEnabled } from './browserSources';
 import { decodeSourceImage } from './sourceImages';
 
 function isBackendUrl(url: string): boolean {
@@ -60,7 +59,7 @@ export function cdnUrl(url: string): string {
     return url;
   }
   const builtin = backupSourceConfigs.find(source => allowedSourceUrl(source, parsed, true));
-  if (builtin) return `/api/source?${new URLSearchParams({ source: builtin.id, url: parsed.href, image: '1', ...(browserSourceEnabled(builtin.id) ? { browser: '1' } : {}) })}`;
+  if (builtin) return `/api/source?${new URLSearchParams({ source: builtin.id, url: parsed.href, image: '1' })}`;
   if (
     host !== 'uploads.mangadex.org' &&
     host !== 'mangadex.network' &&

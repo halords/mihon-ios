@@ -1,9 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
+import { gzipSync } from 'fflate';
 import { gunzipIfNeeded } from '../src/backup/compression';
 import { parseTachibk } from '../src/backup/parser';
 import { inspectTachibkFile, restoreTachibk } from '../src/backup/tachibk';
 import { ProtoReader } from '../src/backup/proto';
-import { getDB, getLibraryEntry, getManga, getChapterState, getArchives, addToLibrary, patchChapterState, downloadRemovalKey, removeFromLibrary } from '../src/lib/db';
+import { getDB, getLibraryEntry, getManga, getChapterState, getArchives, addToLibrary, patchChapterState, downloadRemovalKey, removeFromLibrary, putManga } from '../src/lib/db';
 import { loadSettings } from '../src/lib/settings';
 import { EXACT_SOURCE, NEGATIVE_SOURCE, DEX_MANGA, READ_AT, schemaBackup, schemaFile, integer, string, concat, bytes, varint, float } from './fixtures/mihon';
 
@@ -84,6 +85,21 @@ describe('transactional Mihon migration', () => {
     expect(await getChapterState(key + '::/chapter/1')).toMatchObject({ lastPage: 0, read: false });
     expect((await getLibraryEntry(key))?.categories).toEqual(['Reading', 'Shelf Two', 'Personal']);
     expect(await getArchives()).toHaveLength(1);
+  });
+  it('keeps fresher local manga metadata on restore and takes the backup when it is newer', async () => {
+    // Old backup file (exported 100 s ago): a local refresh after the
+    // export keeps its title through the restore.
+    const oldFile = new File([gzipSync(schemaBackup())], 'old.tachibk', { type: 'application/gzip', lastModified: Date.now() - 100000 });
+    const preview = await inspectTachibkFile(oldFile);
+    await restoreTachibk(preview);
+    expect((await getManga(key))?.manga.title).toBe('Schema Hero');
+    await putManga({ id: '/series/hero', sourceId: EXACT_SOURCE.toString(), title: 'Locally Refreshed Title', coverUrl: '', genres: [], description: '', status: 'Ongoing' });
+    await restoreTachibk(preview);
+    expect((await getManga(key))?.manga.title).toBe('Locally Refreshed Title');
+    // A newer backup file wins over the local copy.
+    const newFile = new File([gzipSync(schemaBackup())], 'new.tachibk', { type: 'application/gzip', lastModified: Date.now() + 100000 });
+    await restoreTachibk(await inspectTachibkFile(newFile));
+    expect((await getManga(key))?.manga.title).toBe('Schema Hero');
   });
   it('allows a removed title to be re-added by an Android import', async () => {
     const preview = await inspectTachibkFile(schemaFile());

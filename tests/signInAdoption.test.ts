@@ -17,16 +17,17 @@ const chapter = key + '::one';
 
 function mockAccountServer() {
   const pushed: string[] = [];
+  const pulled: string[] = [];
   vi.stubGlobal('fetch', vi.fn(async (url: string) => {
     const action = new URL(url, 'http://localhost').searchParams.get('action') ?? '';
     const json = (data: unknown) => new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
     if (action === 'login') return json({ user: { id: 'user-a', email: 'reader@example.com' }, hasSyncedData: true });
     if (action === 'push') { pushed.push('push'); return json({ ok: true }); }
-    if (action.startsWith('pull')) return json({ changes: [], cursor: 0, hasMore: false });
+    if (action.startsWith('pull')) { pulled.push('pull'); return json({ changes: [], cursor: 0, hasMore: false }); }
     if (action === 'status') return json({ configured: true, user: { id: 'user-a', email: 'reader@example.com' } });
     return json({});
   }));
-  return pushed;
+  return { pushed, pulled };
 }
 
 it('adopts a guest-imported library when signing in to an account with existing synced data', async () => {
@@ -35,7 +36,7 @@ it('adopts a guest-imported library when signing in to an account with existing 
   await saveReadingProgress({ key: chapter, mangaKey: key, mangaTitle: 'Hero', coverUrl: '', chapterName: 'Chapter 1', page: 3, updatedAt: 100 }, true);
   expect(await getLibrary()).toHaveLength(1);
 
-  mockAccountServer();
+  const { pushed, pulled } = mockAccountServer();
   await signInAccount('reader@example.com', 'correct horse battery staple');
 
   const db = await getRawDB();
@@ -51,4 +52,9 @@ it('adopts a guest-imported library when signing in to an account with existing 
   expect(record?.pending).toBe(0);
   // The guest snapshot was consumed by the adoption.
   expect(await db.get('syncProfiles', 'guest')).toBeUndefined();
+  // Nit 14: sign-in runs 2 cycles here (pre-adoption pull, then the
+  // post-adoption push/pull) — not the old 3; the trailing cycle is gone,
+  // while the merged data still uploads.
+  expect(pushed).toHaveLength(1);
+  expect(pulled).toHaveLength(2);
 });
