@@ -1,13 +1,14 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { registerSource, unregisterSource } from '../src/sources';
 import { putManga, putChapterMetas, getDB, getChapterState, patchChapterState } from '../src/lib/db';
-import { downloadChapter, maybeAutoDeleteReadChapter } from '../src/lib/downloads';
+import { deleteChapterDownload, downloadChapter, maybeAutoDeleteReadChapter, pageCacheKey, PAGES_CACHE, sweepAutoDeleteReadChapters } from '../src/lib/downloads';
 import { saveSettings } from '../src/lib/settings';
 import { testSource } from './fixtures/source';
 import { svgPage } from './fixtures/mihon';
 
 const key = 'autodel-source::/hero';
 const chapterKey = key + '::/chapter/1';
+const chapterKey2 = key + '::/chapter/2';
 
 afterEach(() => { unregisterSource('autodel-source'); vi.unstubAllGlobals(); saveSettings({ deleteReadDownloads: true }); });
 
@@ -38,6 +39,41 @@ it('keeps the download when the setting is off', async () => {
   saveSettings({ deleteReadDownloads: false });
   await patchChapterState(chapterKey, key, { read: true });
   expect(await maybeAutoDeleteReadChapter(key, chapterKey)).toBe(false);
+  expect(await (await getDB()).get('downloads', chapterKey)).toBeDefined();
+  expect(await getChapterState(chapterKey)).toMatchObject({ read: true, downloaded: true });
+});
+
+it('deletes only the target chapter pages, leaving other chapters cached', async () => {
+  await setupDownloaded();
+  await downloadChapter(key, chapterKey2, 'autodel-source', '/hero', '/chapter/2');
+  const cache = await caches.open(PAGES_CACHE);
+  expect(await cache.match(pageCacheKey(chapterKey2, 0))).toBeDefined();
+  await deleteChapterDownload(key, chapterKey);
+  expect(await (await getDB()).get('downloads', chapterKey)).toBeUndefined();
+  expect(await cache.match(pageCacheKey(chapterKey, 0))).toBeUndefined();
+  expect(await cache.match(pageCacheKey(chapterKey, 2))).toBeUndefined();
+  expect(await (await getDB()).get('downloads', chapterKey2)).toBeDefined();
+  expect(await cache.match(pageCacheKey(chapterKey2, 0))).toBeDefined();
+  expect(await getChapterState(chapterKey2)).toMatchObject({ downloaded: true });
+});
+
+it('startup sweep deletes read chapters and keeps unread ones', async () => {
+  await setupDownloaded();
+  await downloadChapter(key, chapterKey2, 'autodel-source', '/hero', '/chapter/2');
+  await patchChapterState(chapterKey, key, { read: true });
+  expect(await sweepAutoDeleteReadChapters()).toBe(1);
+  expect(await (await getDB()).get('downloads', chapterKey)).toBeUndefined();
+  expect(await getChapterState(chapterKey)).toMatchObject({ read: true, downloaded: false });
+  expect(await (await caches.open(PAGES_CACHE)).match(pageCacheKey(chapterKey, 0))).toBeUndefined();
+  expect(await (await getDB()).get('downloads', chapterKey2)).toBeDefined();
+  expect(await getChapterState(chapterKey2)).toMatchObject({ downloaded: true });
+});
+
+it('startup sweep deletes nothing when the setting is off', async () => {
+  await setupDownloaded();
+  saveSettings({ deleteReadDownloads: false });
+  await patchChapterState(chapterKey, key, { read: true });
+  expect(await sweepAutoDeleteReadChapters()).toBe(0);
   expect(await (await getDB()).get('downloads', chapterKey)).toBeDefined();
   expect(await getChapterState(chapterKey)).toMatchObject({ read: true, downloaded: true });
 });

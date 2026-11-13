@@ -191,18 +191,37 @@ export async function downloadChapter(
   finally { signal?.removeEventListener('abort', abort); active.delete(key); }
 }
 
+// Deletes one chapter's cached pages by constructed URL — page URLs are
+// deterministic (pageCacheKey), so there is no need to enumerate the whole
+// cache. The old full-cache scan listed every cached page in the app
+// (~27,000 entries at 271 chapters), which made each delete slow enough
+// for iOS to suspend the app before the record removal committed — the
+// chapter stayed checked after a manual delete, and the reader-exit
+// auto-delete chain died mid-flight the same way.
+async function deleteCachedChapterPages(storageKey: string, pageCount: number): Promise<void> {
+  if (typeof caches === 'undefined' || !Number.isInteger(pageCount) || pageCount < 1 || pageCount > 5000) return;
+  const cache = await caches.open(PAGES_CACHE);
+  const urls = Array.from({ length: pageCount }, (_, i) => pageCacheKey(storageKey, i));
+  for (let start = 0; start < urls.length; start += 24) {
+    await Promise.all(urls.slice(start, start + 24).map(url => cache.delete(url)));
+  }
+}
+
 export async function deleteChapterDownload(mangaKey: string, key: string): Promise<void> {
   const task = active.get(key);
   if (task) {
     task.controller.abort(new DOMException('Download removed', 'AbortError'));
     await task.promise.catch(() => {});
   }
-  if (typeof caches !== 'undefined') {
-    const cache = await caches.open(PAGES_CACHE);
-    const downloaded = await getDownload(key);
-    const prefixes = [key, downloaded?.cacheKey].filter((value): value is string => !!value).map(value => `https://cache.mihon.local/${encodeURIComponent(value)}/`);
-    for (const request of await cache.keys()) if (prefixes.some(prefix => request.url.startsWith(prefix))) await cache.delete(request);
-  }
+  const downloaded = await getDownload(key);
+  // Commit the record removal FIRST: the chapter stops showing as
+  // downloaded even if the cache sweep below is interrupted (iOS
+  // suspending the app mid-delete used to leave the record behind).
+  // Pages orphaned by an interrupted sweep are inert without a record
+  // (nothing reads them: getCachedPageList and isChapterCached both
+  // require the record) and are overwritten by any later re-download.
+  // A chapter with no record has no manifest to sweep by; its partial
+  // pages (if any) are left as resume fuel for a later download.
   const db = await getDB();
   const tx = db.transaction(['downloads', 'chapterState'], 'readwrite');
   await tx.objectStore('downloads').delete(key);
@@ -211,6 +230,10 @@ export async function deleteChapterDownload(mangaKey: string, key: string): Prom
   else await tx.objectStore('chapterState').put({ key, mangaKey, read: false, lastPage: 0, downloaded: false });
   await tx.done;
   dispatchDataEvent('mihon:downloads-changed');
+  if (downloaded) {
+    try { await deleteCachedChapterPages(downloaded.cacheKey ?? key, downloaded.pageCount); }
+    catch (error) { console.warn('Page sweep failed after the download record was removed', error); }
+  }
 }
 /** Mihon-style cleanup: once a chapter has been read to the end, its
  * downloaded pages are deleted to free storage. Gated by the
@@ -223,6 +246,29 @@ export async function maybeAutoDeleteReadChapter(mangaKey: string, key: string):
   if (!(await getDownload(key))) return false;
   await deleteChapterDownload(mangaKey, key);
   return true;
+}
+
+/** Startup safety net for the deferred auto-delete: the reader-exit path
+ * only runs on a clean exit, so chapters finished in a session that ends
+ * with the app killed or suspended (lock the phone, swipe the app away)
+ * never get deleted. This sweep runs at boot and removes every
+ * read + downloaded chapter while the setting is on. Returns the number
+ * of chapters deleted. Runs after reconcileDownloads, so only chapters
+ * with a valid download record are considered, and before the download
+ * queue starts, so no download is active. */
+export async function sweepAutoDeleteReadChapters(): Promise<number> {
+  if (!loadSettings().deleteReadDownloads) return 0;
+  const db = await getDB();
+  const downloads = await db.getAll('downloads');
+  if (!downloads.length) return 0;
+  const states = new Map((await db.getAll('chapterState')).map(state => [state.key, state]));
+  let deleted = 0;
+  for (const record of downloads) {
+    if (!states.get(record.key)?.read) continue;
+    try { await deleteChapterDownload(record.mangaKey, record.key); deleted++; }
+    catch { /* one stuck chapter must not block the rest */ }
+  }
+  return deleted;
 }
 export async function deleteMangaDownloads(mangaKey: string): Promise<void> {
   const tasks = [...active].filter(([key]) => key.startsWith(mangaKey + '::')).map(([, task]) => task);

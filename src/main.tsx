@@ -5,7 +5,7 @@ import App from './App.tsx'
 import { initPlugins } from './lib/plugins'
 import { initSuwayomi } from './lib/suwayomi'
 import { initDownloadQueue } from './lib/downloadQueue'
-import { reconcileDownloads } from './lib/downloads'
+import { reconcileDownloads, sweepAutoDeleteReadChapters } from './lib/downloads'
 import { initAccount } from './lib/account'
 
 // Local-first app: ask the browser to keep our on-device data (library,
@@ -31,7 +31,7 @@ async function boot(): Promise<void> {
   )
   void initAccount().catch(() => undefined)
   void (async () => {
-    try { await initSuwayomi(); await reconcileDownloads(); await initDownloadQueue(); }
+    try { await initSuwayomi(); await reconcileDownloads(); await sweepAutoDeleteReadChapters(); await initDownloadQueue(); }
     catch { /* An unavailable storage API or connection must not block the shell. */ }
   })()
 }
